@@ -46,7 +46,7 @@ type model struct {
 func newModel(ctx context.Context, cfg config.Config) *model {
 	m := &model{
 		ctx:       ctx,
-		collector: collect.New(cfg.Endpoint),
+		collector: collect.New(cfg.Endpoint, cfg.APIKey),
 		palette:   newPalette(),
 		width:     100,
 		height:    30,

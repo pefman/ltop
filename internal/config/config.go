@@ -15,6 +15,7 @@ import (
 // Config is the on-disk settings document.
 type Config struct {
 	Endpoint       string `json:"endpoint"`
+	APIKey         string `json:"api_key,omitempty"`
 	PollIntervalMS int    `json:"poll_interval_ms"`
 }
 

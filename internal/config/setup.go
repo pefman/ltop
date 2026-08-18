@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -25,6 +26,10 @@ func Setup(ctx context.Context, in io.Reader, out io.Writer) (Config, error) {
 
 	for i, f := range found {
 		fmt.Fprintf(out, "  [%d] %s\n", i+1, f.Endpoint)
+		if f.NeedsAuth {
+			fmt.Fprintln(out, "      requires an API key")
+			continue
+		}
 		fmt.Fprintf(out, "      model %s", orDash(f.Model))
 		if f.Build != "" {
 			fmt.Fprintf(out, "  build %s", f.Build)
@@ -38,13 +43,20 @@ func Setup(ctx context.Context, in io.Reader, out io.Writer) (Config, error) {
 		fmt.Fprintln(out, "  none found on the usual ports")
 	}
 
-	endpoint, err := prompt(in, out, found)
+	reader := bufio.NewReader(in)
+	endpoint, err := prompt(reader, out, found)
+	if err != nil {
+		return Config{}, err
+	}
+
+	apiKey, err := promptAPIKey(ctx, reader, out, endpoint)
 	if err != nil {
 		return Config{}, err
 	}
 
 	c := Config{
 		Endpoint:       endpoint,
+		APIKey:         apiKey,
 		PollIntervalMS: int(DefaultPollInterval / time.Millisecond),
 	}
 	if err := Save(c); err != nil {
@@ -56,8 +68,31 @@ func Setup(ctx context.Context, in io.Reader, out io.Writer) (Config, error) {
 	return c, nil
 }
 
-func prompt(in io.Reader, out io.Writer, found []discover.Found) (string, error) {
-	reader := bufio.NewReader(in)
+// promptAPIKey asks for a key only when the endpoint actually rejects an
+// anonymous request, so the common no-auth case stays a single keystroke.
+func promptAPIKey(ctx context.Context, reader *bufio.Reader, out io.Writer, endpoint string) (string, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	_, err := llama.New(endpoint, "").Health(probeCtx)
+	if !errors.Is(err, llama.ErrUnauthorized) {
+		return "", nil
+	}
+
+	fmt.Fprint(out, "\nThat server requires an API key.\nKey: ")
+	line, readErr := reader.ReadString('\n')
+	key := strings.TrimSpace(line)
+	if key == "" {
+		if readErr != nil {
+			return "", fmt.Errorf("an API key is required for %s: %w", endpoint, readErr)
+		}
+		return "", fmt.Errorf("an API key is required for %s", endpoint)
+	}
+	return key, nil
+}
+
+func prompt(reader *bufio.Reader, out io.Writer, found []discover.Found) (string, error) {
+
 	for {
 		if len(found) > 0 {
 			fmt.Fprintf(out, "\nSelect 1-%d, or enter a URL [1]: ", len(found))

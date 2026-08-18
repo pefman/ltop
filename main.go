@@ -44,7 +44,7 @@ func run(ctx context.Context, once, reconfigure bool) error {
 		return err
 	}
 	if once {
-		return runOnce(ctx, os.Stdout, cfg.Endpoint)
+		return runOnce(ctx, os.Stdout, cfg)
 	}
 	return ui.Run(ctx, cfg)
 }

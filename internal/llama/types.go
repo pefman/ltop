@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// statusLoading is the state reported while a model is still being loaded.
+const statusLoading = "loading model"
+
 // Health is the /health response.
 type Health struct {
 	Status string `json:"status"`
@@ -13,6 +16,9 @@ type Health struct {
 
 // OK reports whether the server declared itself ready.
 func (h Health) OK() bool { return strings.EqualFold(h.Status, "ok") }
+
+// Loading reports whether the server is up but still loading a model.
+func (h Health) Loading() bool { return strings.EqualFold(h.Status, statusLoading) }
 
 // Props is the subset of /props that ltop displays. llama.cpp returns a large
 // document including the full chat template; unused fields are dropped.
@@ -97,4 +103,39 @@ func decodeModels(b []byte) ([]Model, error) {
 		return nil, err
 	}
 	return r.Data, nil
+}
+
+// MatchModel finds the /v1/models entry describing the model named in props.
+//
+// A router such as llama-swap serves several models from one endpoint, so
+// taking the first entry would pair one model's name with another's size and
+// quantisation. When no entry matches confidently the caller gets no metadata
+// rather than wrong metadata.
+func MatchModel(models []Model, props Props) (Model, bool) {
+	switch len(models) {
+	case 0:
+		return Model{}, false
+	case 1:
+		return models[0], true
+	}
+
+	name := strings.ToLower(props.ModelName())
+	if name == "" {
+		return Model{}, false
+	}
+
+	for _, m := range models {
+		if strings.EqualFold(m.ID, props.ModelName()) {
+			return m, true
+		}
+	}
+	// llama.cpp usually serves an alias shorter than the GGUF filename, for
+	// example id qwen3.8-27b for Qwen3.8-27B-UD-Q4_K_XL.gguf.
+	for _, m := range models {
+		id := strings.ToLower(m.ID)
+		if id != "" && (strings.Contains(name, id) || strings.Contains(id, name)) {
+			return m, true
+		}
+	}
+	return Model{}, false
 }

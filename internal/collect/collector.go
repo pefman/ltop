@@ -34,6 +34,7 @@ type Collector struct {
 	startAt  time.Time
 
 	lastModel       string
+	modelUnmatched  bool
 	lastDecodeRate  float64
 	lastPrefillRate float64
 	lastDecodeAt    time.Time
@@ -45,9 +46,9 @@ type Collector struct {
 }
 
 // New returns a collector for the given endpoint.
-func New(endpoint string) *Collector {
+func New(endpoint, apiKey string) *Collector {
 	return &Collector{
-		client:      llama.New(endpoint),
+		client:      llama.New(endpoint, apiKey),
 		gpus:        gpu.NewMulti(),
 		hostS:       host.NewSampler(),
 		startAt:     time.Now(),
@@ -69,6 +70,10 @@ func (c *Collector) HasGPU() bool { return c.gpus.Available() }
 // Poll performs one scrape and returns a derived snapshot. A snapshot is
 // always returned, with Online false and Err set when the server is
 // unreachable, so the caller can render an error state rather than exit.
+//
+// Liveness comes from /health alone. A server started without --metrics or
+// --slots is still online and still worth showing; those panels degrade
+// individually rather than blanking the dashboard.
 func (c *Collector) Poll(ctx context.Context) Snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -81,34 +86,47 @@ func (c *Collector) Poll(ctx context.Context) Snapshot {
 	snap.Host = c.hostS.Sample()
 	snap.GPUs = c.gpus.Sample(ctx)
 
-	set, err := c.client.Metrics(ctx)
+	health, err := c.client.Health(ctx)
 	snap.ScrapeR = time.Since(start)
 	if err != nil {
 		snap.Err = err
+		snap.NeedsAuth = errors.Is(err, llama.ErrUnauthorized)
 		return snap
 	}
 	snap.Online = true
-	snap.Raw = llama.ParseMetrics(set)
+	snap.Loading = health.Loading()
+
+	if set, err := c.client.Metrics(ctx); err == nil {
+		snap.Raw = llama.ParseMetrics(set)
+		snap.HasMetrics = true
+	} else if !errors.Is(err, llama.ErrEndpointDisabled) {
+		snap.Err = err
+	}
 
 	c.refreshProps(ctx, start, &snap)
 	snap.Props = c.props
 	snap.Model = c.model
+	snap.ModelUnmatched = c.modelUnmatched
 
 	if slots, err := c.client.Slots(ctx); err == nil {
 		snap.Slots = slots
-	} else if !errors.Is(err, llama.ErrSlotsDisabled) {
+		snap.HasSlots = true
+	} else if !errors.Is(err, llama.ErrEndpointDisabled) {
 		snap.Err = err
 	}
 	snap.ContextPressure = contextPressure(snap.Slots)
 
-	c.deriveRates(&snap, start)
-	deriveEfficiency(&snap)
+	if snap.HasMetrics {
+		c.deriveRates(&snap, start)
+		deriveEfficiency(&snap)
 
-	c.DecodeHist.Push(snap.DecodeTokensPerSec)
-	c.PrefillHist.Push(snap.PrefillTokensPerSec)
-	c.StepHist.Push(snap.DecodeStepsPerSec)
+		c.DecodeHist.Push(snap.DecodeTokensPerSec)
+		c.PrefillHist.Push(snap.PrefillTokensPerSec)
+		c.StepHist.Push(snap.DecodeStepsPerSec)
 
-	c.prev, c.prevAt, c.havePrev = snap.Raw, start, true
+		c.prev, c.prevAt, c.havePrev = snap.Raw, start, true
+	}
+	snap.ScrapeR = time.Since(start)
 	return snap
 }
 
@@ -197,8 +215,9 @@ func (c *Collector) refreshProps(ctx context.Context, now time.Time, snap *Snaps
 	c.lastModel = props.ModelPath
 	c.props = props
 
-	if models, err := c.client.Models(ctx); err == nil && len(models) > 0 {
-		c.model = models[0]
+	if models, err := c.client.Models(ctx); err == nil {
+		model, ok := llama.MatchModel(models, props)
+		c.model, c.modelUnmatched = model, !ok && len(models) > 0
 	}
 }
 

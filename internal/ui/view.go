@@ -37,16 +37,24 @@ func (m *model) View() string {
 	if m.snap.ModelChanged {
 		b.WriteString(p.Warn.Render("  model changed; history cleared") + "\n")
 	}
+	if m.snap.ModelUnmatched {
+		b.WriteString(p.Warn.Render("  several models served here; metadata withheld to avoid mismatching") + "\n")
+	}
+	if !m.snap.HasMetrics {
+		b.WriteString(p.Warn.Render("  no throughput data; restart llama-server with --metrics") + "\n")
+	}
 
 	b.WriteString(m.resourceView())
-	b.WriteString("\n")
-	b.WriteString(m.throughputView())
-	b.WriteString("\n")
-	b.WriteString(m.qualityView())
-
-	if m.showSpec && m.snap.Raw.SpecEnabled() {
+	if m.snap.HasMetrics {
 		b.WriteString("\n")
-		b.WriteString(m.specView())
+		b.WriteString(m.throughputView())
+		b.WriteString("\n")
+		b.WriteString(m.qualityView())
+
+		if m.showSpec && m.snap.Raw.SpecEnabled() {
+			b.WriteString("\n")
+			b.WriteString(m.specView())
+		}
 	}
 
 	b.WriteString("\n")
@@ -80,6 +88,8 @@ func (m *model) headerView() string {
 	switch {
 	case !s.Online:
 		status = " ● offline "
+	case s.Loading:
+		status = " ● loading model "
 	case s.Props.IsSleeping:
 		status = " ● sleeping "
 	case m.paused:
@@ -110,8 +120,12 @@ func (m *model) offlineView() string {
 	if m.snap.Err != nil {
 		msg = m.snap.Err.Error()
 	}
+	hint := "retrying every " + m.interval().String()
+	if m.snap.NeedsAuth {
+		hint = "run 'ltop -reconfigure' to supply an API key"
+	}
 	return "\n" + p.Err.Render("  "+format.Truncate(msg, m.width-4)+"  ") +
-		"\n\n" + p.Muted.Render("  retrying every "+m.interval().String()) + "\n"
+		"\n\n" + p.Muted.Render("  "+hint) + "\n"
 }
 
 func (m *model) resourceView() string {

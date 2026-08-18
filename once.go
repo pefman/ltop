@@ -8,17 +8,18 @@ import (
 	"time"
 
 	"github.com/pefman/ltop/internal/collect"
+	"github.com/pefman/ltop/internal/config"
 	"github.com/pefman/ltop/internal/format"
 	"github.com/pefman/ltop/internal/gpu"
 )
 
 // runOnce prints a single plain-text snapshot. Two scrapes are taken because
 // live rates are derived from the delta between them.
-func runOnce(ctx context.Context, out io.Writer, endpoint string) error {
-	c := collect.New(endpoint)
+func runOnce(ctx context.Context, out io.Writer, cfg config.Config) error {
+	c := collect.New(cfg.Endpoint, cfg.APIKey)
 
 	snap := c.Poll(ctx)
-	if snap.Online {
+	if snap.Online && snap.HasMetrics {
 		select {
 		case <-time.After(time.Second):
 		case <-ctx.Done():
@@ -27,10 +28,10 @@ func runOnce(ctx context.Context, out io.Writer, endpoint string) error {
 		snap = c.Poll(ctx)
 	}
 	if !snap.Online {
-		return fmt.Errorf("%s unreachable: %w", endpoint, snap.Err)
+		return fmt.Errorf("%s unreachable: %w", cfg.Endpoint, snap.Err)
 	}
 
-	printSnapshot(out, endpoint, snap)
+	printSnapshot(out, cfg.Endpoint, snap)
 	return nil
 }
 
@@ -42,16 +43,29 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 	kv(out, "build", p.BuildInfo)
 	kv(out, "scrape", s.ScrapeR.Round(time.Microsecond).String())
 	kv(out, "sleeping", fmt.Sprint(p.IsSleeping))
+	kv(out, "metrics", available(s.HasMetrics, "start llama-server with --metrics"))
+	kv(out, "slots", available(s.HasSlots, "start llama-server with --slots"))
+	if s.Loading {
+		kv(out, "state", "loading model")
+	}
 
 	section(out, "model")
 	kv(out, "name", p.ModelName())
-	if s.Model.ID != "" {
+	if s.ModelUnmatched {
+		kv(out, "metadata", "withheld; endpoint serves several models")
+	} else if s.Model.ID != "" {
 		meta := s.Model.Meta
 		kv(out, "id", s.Model.ID)
 		kv(out, "quant", meta.FType)
 		kv(out, "params", format.Count(float64(meta.NParams)))
 		kv(out, "size", format.Bytes(uint64(meta.Size)))
 		kv(out, "context", fmt.Sprintf("%d of %d trained", meta.NCtx, meta.NCtxTrain))
+	}
+
+	if !s.HasMetrics {
+		printHost(out, s)
+		fmt.Fprintln(out)
+		return
 	}
 
 	section(out, "throughput")
@@ -119,6 +133,28 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 		}
 	}
 	fmt.Fprintln(out)
+}
+
+func printHost(out io.Writer, s collect.Snapshot) {
+	section(out, "host")
+	kv(out, "cpu", fmt.Sprintf("%.1f%% over %d cores", s.Host.CPUPercent, s.Host.CPUCores))
+	kv(out, "memory", fmt.Sprintf("%s of %s (%s)",
+		format.Bytes(s.Host.MemUsedBytes()), format.Bytes(s.Host.MemTotalBytes), format.Percent(s.Host.MemPercent())))
+	kv(out, "load", fmt.Sprintf("%.2f", s.Host.LoadAvg1))
+
+	if len(s.GPUs) > 0 {
+		section(out, "gpu")
+		for _, d := range s.GPUs {
+			printGPU(out, d)
+		}
+	}
+}
+
+func available(ok bool, hint string) string {
+	if ok {
+		return "available"
+	}
+	return "unavailable; " + hint
 }
 
 func printGPU(out io.Writer, d gpu.Device) {

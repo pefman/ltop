@@ -142,3 +142,60 @@ func TestPropsModelName(t *testing.T) {
 		t.Errorf("ModelName empty = %q", got)
 	}
 }
+
+// A router serving several models must not pair one model's name with
+// another's size and quantisation.
+func TestMatchModel(t *testing.T) {
+	qwen := Model{ID: "qwen3.8-27b", Meta: ModelMeta{Size: 17912397824}}
+	llama8b := Model{ID: "llama-3.1-8b", Meta: ModelMeta{Size: 8540770304}}
+	props := func(p string) Props { return Props{ModelPath: p} }
+
+	t.Run("single model is always used", func(t *testing.T) {
+		got, ok := MatchModel([]Model{llama8b}, props("/m/Anything-Else.gguf"))
+		if !ok || got.ID != "llama-3.1-8b" {
+			t.Errorf("got %q ok=%v", got.ID, ok)
+		}
+	})
+
+	t.Run("alias shorter than filename", func(t *testing.T) {
+		got, ok := MatchModel([]Model{llama8b, qwen}, props("/m/Qwen3.8-27B-UD-Q4_K_XL.gguf"))
+		if !ok || got.ID != "qwen3.8-27b" {
+			t.Errorf("got %q ok=%v, want qwen3.8-27b", got.ID, ok)
+		}
+	})
+
+	t.Run("exact id match", func(t *testing.T) {
+		got, ok := MatchModel([]Model{llama8b, qwen}, props("/m/llama-3.1-8b.gguf"))
+		if !ok || got.ID != "llama-3.1-8b" {
+			t.Errorf("got %q ok=%v", got.ID, ok)
+		}
+	})
+
+	t.Run("no confident match withholds metadata", func(t *testing.T) {
+		got, ok := MatchModel([]Model{llama8b, qwen}, props("/m/Phi-4-Q6_K.gguf"))
+		if ok {
+			t.Errorf("matched %q, want no match", got.ID)
+		}
+		if got.Meta.Size != 0 {
+			t.Error("returned metadata despite no match")
+		}
+	})
+
+	t.Run("empty list", func(t *testing.T) {
+		if _, ok := MatchModel(nil, props("/m/x.gguf")); ok {
+			t.Error("matched against an empty model list")
+		}
+	})
+}
+
+func TestHealthStates(t *testing.T) {
+	if !(Health{Status: "ok"}).OK() {
+		t.Error("ok not recognised")
+	}
+	if !(Health{Status: "loading model"}).Loading() {
+		t.Error("loading not recognised")
+	}
+	if (Health{Status: "ok"}).Loading() {
+		t.Error("ok reported as loading")
+	}
+}

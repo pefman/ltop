@@ -15,9 +15,11 @@ import (
 // qwen3.8-27b with speculative decoding on an RTX 4090.
 func sampleSnapshot() collect.Snapshot {
 	return collect.Snapshot{
-		At:      time.Now(),
-		ScrapeR: 27 * time.Millisecond,
-		Online:  true,
+		At:         time.Now(),
+		ScrapeR:    27 * time.Millisecond,
+		Online:     true,
+		HasMetrics: true,
+		HasSlots:   true,
 		Props: llama.Props{
 			ModelPath: "/home/u/qwen3.8/Qwen3.8-27B-UD-Q4_K_XL.gguf",
 			BuildInfo: "b10430-4c1a0af40",
@@ -120,6 +122,51 @@ func TestOfflineViewDoesNotPanic(t *testing.T) {
 	out := m.View()
 	if !strings.Contains(out, "unreachable") {
 		t.Errorf("offline view missing error text:\n%s", out)
+	}
+}
+
+// A server without --metrics must still render its panels, not an error page.
+func TestViewWithoutMetricsStillRendersServer(t *testing.T) {
+	m := newTestModel(t, 100)
+	snap := sampleSnapshot()
+	snap.HasMetrics = false
+	m.snap = snap
+
+	out := m.View()
+	if strings.Contains(out, "offline") {
+		t.Error("a server without --metrics rendered as offline")
+	}
+	for _, want := range []string{"online", "--metrics", "GPU0", "SLOT", "Qwen3.8-27B"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view missing %q", want)
+		}
+	}
+	if strings.Contains(out, "KV CACHE") {
+		t.Error("throughput panels rendered without metrics data")
+	}
+}
+
+func TestViewShowsLoadingAndUnmatchedModel(t *testing.T) {
+	m := newTestModel(t, 110)
+	snap := sampleSnapshot()
+	snap.Loading = true
+	snap.ModelUnmatched = true
+	m.snap = snap
+
+	out := m.View()
+	if !strings.Contains(out, "loading model") {
+		t.Error("loading state not shown")
+	}
+	if !strings.Contains(out, "several models") {
+		t.Error("unmatched model warning not shown")
+	}
+}
+
+func TestOfflineViewHintsAtAuth(t *testing.T) {
+	m := newTestModel(t, 100)
+	m.snap = collect.Snapshot{Online: false, NeedsAuth: true, Err: errTest{}}
+	if out := m.View(); !strings.Contains(out, "API key") {
+		t.Errorf("auth hint missing:\n%s", out)
 	}
 }
 

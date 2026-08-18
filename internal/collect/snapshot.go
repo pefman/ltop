@@ -18,6 +18,18 @@ type Snapshot struct {
 	Online bool
 	Err    error
 
+	// Loading reports that the server is up but still loading a model.
+	Loading bool
+	// NeedsAuth reports that the server rejected the request for lack of a key.
+	NeedsAuth bool
+	// HasMetrics and HasSlots report whether those endpoints answered. A
+	// server started without --metrics or --slots is still online.
+	HasMetrics bool
+	HasSlots   bool
+	// ModelUnmatched reports that /v1/models listed several models and none
+	// could be tied to the loaded one, so its metadata is withheld.
+	ModelUnmatched bool
+
 	Props llama.Props
 	Model llama.Model
 	Slots []llama.Slot

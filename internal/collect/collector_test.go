@@ -17,9 +17,13 @@ import (
 // controls.
 type fakeServer struct {
 	*httptest.Server
-	metrics   string
-	slots     []llama.Slot
-	modelPath string
+	metrics    string
+	slots      []llama.Slot
+	modelPath  string
+	noMetrics  bool
+	noSlots    bool
+	unhealthy  bool
+	requireKey string
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
@@ -27,16 +31,57 @@ func newFakeServer(t *testing.T) *fakeServer {
 	f := &fakeServer{modelPath: "/models/a.gguf"}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+	auth := func(w http.ResponseWriter, r *http.Request) bool {
+		if f.requireKey == "" {
+			return true
+		}
+		if r.Header.Get("Authorization") == "Bearer "+f.requireKey {
+			return true
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if !auth(w, r) {
+			return
+		}
+		if f.unhealthy {
+			http.Error(w, `{"status":"loading model"}`, http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(w, `{"status":"ok"}`)
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if !auth(w, r) {
+			return
+		}
+		if f.noMetrics {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
 		fmt.Fprint(w, f.metrics)
 	})
-	mux.HandleFunc("/props", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/props", func(w http.ResponseWriter, r *http.Request) {
+		if !auth(w, r) {
+			return
+		}
 		_ = json.NewEncoder(w).Encode(llama.Props{ModelPath: f.modelPath, BuildInfo: "test"})
 	})
-	mux.HandleFunc("/slots", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/slots", func(w http.ResponseWriter, r *http.Request) {
+		if !auth(w, r) {
+			return
+		}
+		if f.noSlots {
+			http.Error(w, "disabled", http.StatusNotImplemented)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(f.slots)
 	})
-	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		if !auth(w, r) {
+			return
+		}
 		fmt.Fprint(w, `{"data":[{"id":"m","meta":{"n_ctx":4096}}]}`)
 	})
 
@@ -60,7 +105,7 @@ func TestFirstPollHasNoRates(t *testing.T) {
 	f := newFakeServer(t)
 	f.setCounters(100, 1000, 10, 500, 1)
 
-	c := New(f.URL)
+	c := New(f.URL, "")
 	snap := c.Poll(context.Background())
 
 	if !snap.Online {
@@ -78,7 +123,7 @@ func TestFirstPollHasNoRates(t *testing.T) {
 // held with a growing age rather than dropping to zero.
 func TestMeasuredRateIsStickyAndAges(t *testing.T) {
 	f := newFakeServer(t)
-	c := New(f.URL)
+	c := New(f.URL, "")
 	ctx := context.Background()
 
 	f.setCounters(100, 1000, 10, 500, 1)
@@ -120,7 +165,7 @@ func TestMeasuredRateIsStickyAndAges(t *testing.T) {
 // reporting a negative rate.
 func TestCounterResetRebaselines(t *testing.T) {
 	f := newFakeServer(t)
-	c := New(f.URL)
+	c := New(f.URL, "")
 	ctx := context.Background()
 
 	f.setCounters(100, 1000, 10, 500, 1)
@@ -148,7 +193,7 @@ func TestCounterResetRebaselines(t *testing.T) {
 }
 
 func TestOfflineServerYieldsSnapshotNotPanic(t *testing.T) {
-	c := New("http://127.0.0.1:1")
+	c := New("http://127.0.0.1:1", "")
 	snap := c.Poll(context.Background())
 
 	if snap.Online {
@@ -156,6 +201,79 @@ func TestOfflineServerYieldsSnapshotNotPanic(t *testing.T) {
 	}
 	if snap.Err == nil {
 		t.Error("Err = nil for an unreachable server")
+	}
+}
+
+// A server started without --metrics is still online; blanking the dashboard
+// would misreport a working server as down.
+func TestServerWithoutMetricsStaysOnline(t *testing.T) {
+	f := newFakeServer(t)
+	f.noMetrics = true
+	f.slots = []llama.Slot{{ID: 0, NCtx: 4096, PromptTokens: 2048}}
+
+	snap := New(f.URL, "").Poll(context.Background())
+
+	if !snap.Online {
+		t.Fatalf("Online = false without --metrics: %v", snap.Err)
+	}
+	if snap.HasMetrics {
+		t.Error("HasMetrics = true although /metrics returned 404")
+	}
+	if snap.Err != nil {
+		t.Errorf("Err = %v, want nil for a disabled endpoint", snap.Err)
+	}
+	if !snap.HasSlots || len(snap.Slots) != 1 {
+		t.Error("slots not read while metrics were unavailable")
+	}
+	if snap.ContextPressure != 0.5 {
+		t.Errorf("ContextPressure = %v, want 0.5", snap.ContextPressure)
+	}
+}
+
+// A server started without --slots must likewise stay online.
+func TestServerWithoutSlotsStaysOnline(t *testing.T) {
+	f := newFakeServer(t)
+	f.noSlots = true
+	f.setCounters(100, 1000, 10, 500, 1)
+
+	snap := New(f.URL, "").Poll(context.Background())
+
+	if !snap.Online || !snap.HasMetrics {
+		t.Fatalf("online=%v metrics=%v err=%v", snap.Online, snap.HasMetrics, snap.Err)
+	}
+	if snap.HasSlots {
+		t.Error("HasSlots = true although /slots returned 501")
+	}
+	if snap.Err != nil {
+		t.Errorf("Err = %v, want nil for a disabled endpoint", snap.Err)
+	}
+}
+
+func TestLoadingServerReportsLoading(t *testing.T) {
+	f := newFakeServer(t)
+	f.unhealthy = true
+	f.setCounters(100, 1000, 10, 500, 1)
+
+	snap := New(f.URL, "").Poll(context.Background())
+
+	if !snap.Online {
+		t.Fatalf("Online = false while loading: %v", snap.Err)
+	}
+	if !snap.Loading {
+		t.Error("Loading = false for a 503 health response")
+	}
+}
+
+func TestAPIKeyIsSent(t *testing.T) {
+	f := newFakeServer(t)
+	f.requireKey = "secret-token"
+	f.setCounters(100, 1000, 10, 500, 1)
+
+	if snap := New(f.URL, "").Poll(context.Background()); snap.Online || !snap.NeedsAuth {
+		t.Errorf("without key: online=%v needsAuth=%v", snap.Online, snap.NeedsAuth)
+	}
+	if snap := New(f.URL, "secret-token").Poll(context.Background()); !snap.Online || !snap.HasMetrics {
+		t.Errorf("with key: online=%v metrics=%v err=%v", snap.Online, snap.HasMetrics, snap.Err)
 	}
 }
 

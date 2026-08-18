@@ -3,6 +3,7 @@ package discover
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sort"
 	"strconv"
@@ -24,6 +25,8 @@ type Found struct {
 	Build     string
 	HasSlots  bool
 	HasMetric bool
+	// NeedsAuth reports that the server answered but demanded an API key.
+	NeedsAuth bool
 }
 
 // Scan probes localhost for llama.cpp servers. Ports are dialled concurrently
@@ -71,12 +74,19 @@ func probe(ctx context.Context, port int) (Found, bool) {
 	_ = conn.Close()
 
 	endpoint := "http://" + addr
-	c := llama.New(endpoint)
+	c := llama.New(endpoint, "")
 
 	propsCtx, cancelProps := context.WithTimeout(ctx, 2*time.Second)
 	defer cancelProps()
 	props, err := c.Props(propsCtx)
-	if err != nil || props.ModelPath == "" {
+	if err != nil {
+		// A server behind --api-key still identifies itself as worth offering.
+		if errors.Is(err, llama.ErrUnauthorized) {
+			return Found{Endpoint: endpoint, NeedsAuth: true}, true
+		}
+		return Found{}, false
+	}
+	if props.ModelPath == "" {
 		return Found{}, false
 	}
 

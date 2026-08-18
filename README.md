@@ -12,7 +12,12 @@ Start `llama-server` with slot and metrics introspection enabled:
 llama-server -m model.gguf --slots --metrics
 ```
 
-Without `--metrics` there is no throughput data; without `--slots` the slot table is empty. `ltop` reports which one is missing.
+Both flags are optional. Without `--metrics` you lose the throughput, cache and
+speculative panels; without `--slots` you lose the slot table. `ltop` stays
+online either way and says which flag is missing.
+
+Servers started with `--api-key` are supported; `ltop` asks for the key during
+setup and stores it in the config file.
 
 GPU panels use `nvidia-smi` for NVIDIA cards and the `amdgpu` sysfs interface for AMD. Neither is required — the panel is hidden when no GPU is readable.
 
@@ -59,6 +64,14 @@ On first run `ltop` scans localhost for llama.cpp servers, asks which to monitor
 **`tok/J`** — decode tokens per joule of GPU energy, for comparing quantisations and offload splits. Only reported while actively decoding.
 
 **`QUEUE`** — requests processing and deferred, plus average busy slots per decode, which shows how well batching is being used.
+
+## Multiple models
+
+Model metadata is matched against the loaded model rather than taken from the
+first entry of `/v1/models`. On a router such as `llama-swap` that serves
+several models, `ltop` withholds quantisation and size rather than pairing them
+with the wrong model's name. Model swaps are detected within ten seconds and
+clear the rate history so a fast model's numbers do not blend into a slow one's.
 
 ## Development
 
