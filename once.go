@@ -74,8 +74,18 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 	kv(out, "prefill measured", measured(s.PrefillTokensPerSec, s.PrefillAge, s.HasPrefillMeasured))
 	kv(out, "decode lifetime", format.Rate(m.LifetimePredictedTokensPerSec())+" tok/s")
 	kv(out, "prefill lifetime", format.Rate(m.LifetimePromptTokensPerSec())+" tok/s")
+
+	section(out, "totals")
 	kv(out, "tokens generated", format.Count(m.PredictedTokensTotal))
+	kv(out, "tokens prefilled", format.Count(m.PromptTokensTotal))
+	kv(out, "tokens reused from cache", format.Count(m.PromptCachedTotal))
 	kv(out, "decode calls", format.Count(m.DecodeTotal))
+	if saved := m.PrefillTimeSaved(); saved > 0 {
+		kv(out, "prefill time saved", "~"+format.Compact(saved)+" (estimate)")
+	}
+	if s.HasEnergy {
+		kv(out, "gpu energy observed", fmt.Sprintf("%.2f Wh", s.EnergyWh))
+	}
 
 	section(out, "cache")
 	kv(out, "hit rate", format.Percent(m.CacheHitRate()))

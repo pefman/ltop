@@ -192,3 +192,41 @@ func TestHelpView(t *testing.T) {
 type errTest struct{}
 
 func (errTest) Error() string { return "dial tcp 127.0.0.1:11436: connection refused (unreachable)" }
+
+func TestTotalsLineShowsLifetimeCounters(t *testing.T) {
+	m := newTestModel(t, 110)
+	snap := sampleSnapshot()
+	snap.EnergyWh, snap.HasEnergy = 12.4, true
+	m.snap = snap
+
+	out := m.View()
+	for _, want := range []string{"TOTALS", "generated", "prefilled", "cached", "decodes", "saved", "12.4Wh"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("totals line missing %q", want)
+		}
+	}
+}
+
+// Context sizes are configuration values, so 262144 must not render as 262.1k.
+func TestHeaderShowsRawContextSizes(t *testing.T) {
+	m := newTestModel(t, 110)
+	out := m.View()
+	if !strings.Contains(out, "ctx 140032/262144") {
+		t.Errorf("raw context sizes missing from header:\n%s", out)
+	}
+	if strings.Contains(out, "262.1k") {
+		t.Error("context still rendered with SI rounding")
+	}
+}
+
+// Without metrics there are no counters to total.
+func TestTotalsHiddenWithoutMetrics(t *testing.T) {
+	m := newTestModel(t, 110)
+	snap := sampleSnapshot()
+	snap.HasMetrics = false
+	m.snap = snap
+
+	if strings.Contains(m.View(), "TOTALS") {
+		t.Error("totals rendered without metrics")
+	}
+}

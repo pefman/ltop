@@ -67,6 +67,20 @@ func Duration(d time.Duration) string {
 	return fmt.Sprintf("%ds", s)
 }
 
+// Compact renders a duration at two significant units, for figures that are
+// scanned rather than read precisely.
+func Compact(d time.Duration) string {
+	d = d.Round(time.Second)
+	switch {
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+}
+
 // Bar renders a fixed-width text meter for a 0..1 ratio.
 func Bar(ratio float64, width int) string {
 	if width <= 0 {

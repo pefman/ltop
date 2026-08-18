@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pefman/ltop/internal/promparse"
 )
@@ -197,5 +198,41 @@ func TestHealthStates(t *testing.T) {
 	}
 	if (Health{Status: "ok"}).Loading() {
 		t.Error("ok reported as loading")
+	}
+}
+
+func TestPrefillTimeSaved(t *testing.T) {
+	// 615171 cached tokens valued at the fixture's mean prefill rate of
+	// 201641/160.826 = 1253.8 tok/s gives roughly 8 minutes avoided.
+	f, err := os.Open("../promparse/testdata/metrics.txt")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer f.Close()
+
+	set, err := promparse.Parse(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	m := ParseMetrics(set)
+
+	got := m.PrefillTimeSaved()
+	rate := 201641.0 / 160.826
+	want := time.Duration(615171.0 / rate * float64(time.Second))
+	if got != want {
+		t.Errorf("PrefillTimeSaved = %v, want %v", got, want)
+	}
+	if got < 8*time.Minute || got > 8*time.Minute+30*time.Second {
+		t.Errorf("PrefillTimeSaved = %v, want ~8m10s", got)
+	}
+}
+
+// Without a prefill rate there is nothing to value cached tokens against.
+func TestPrefillTimeSavedWithoutData(t *testing.T) {
+	if got := (Metrics{PromptCachedTotal: 1000}).PrefillTimeSaved(); got != 0 {
+		t.Errorf("PrefillTimeSaved with no rate = %v, want 0", got)
+	}
+	if got := (Metrics{PromptTokensTotal: 100, PromptSecondsTotal: 1}).PrefillTimeSaved(); got != 0 {
+		t.Errorf("PrefillTimeSaved with no cache = %v, want 0", got)
 	}
 }

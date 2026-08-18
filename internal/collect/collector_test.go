@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -347,5 +348,50 @@ func TestHistoryRingEvictsOldest(t *testing.T) {
 	h.Reset()
 	if len(h.Values()) != 0 || h.Max() != 0 || h.Last() != 0 {
 		t.Error("Reset did not clear the ring")
+	}
+}
+
+func TestEnergyAccumulates(t *testing.T) {
+	c := New("http://127.0.0.1:1", "")
+	snap := Snapshot{GPUs: []gpu.Device{{PowerWatts: 360, HasPower: true}}}
+	start := time.Now()
+
+	c.accumulateEnergy(&snap, start)
+	if snap.EnergyWh != 0 {
+		t.Errorf("first sample = %v Wh, want 0 (no interval yet)", snap.EnergyWh)
+	}
+
+	// 360 W held for 10 s is exactly 1 Wh.
+	c.accumulateEnergy(&snap, start.Add(10*time.Second))
+	if !snap.HasEnergy {
+		t.Fatal("HasEnergy = false after two samples")
+	}
+	if math.Abs(snap.EnergyWh-1) > 1e-9 {
+		t.Errorf("EnergyWh = %v, want 1", snap.EnergyWh)
+	}
+}
+
+// A suspended machine reports a huge gap; charging it as energy would invent
+// kilowatt-hours that were never drawn.
+func TestEnergyIgnoresImplausibleGap(t *testing.T) {
+	c := New("http://127.0.0.1:1", "")
+	snap := Snapshot{GPUs: []gpu.Device{{PowerWatts: 400, HasPower: true}}}
+	start := time.Now()
+
+	c.accumulateEnergy(&snap, start)
+	c.accumulateEnergy(&snap, start.Add(6*time.Hour))
+	if snap.EnergyWh != 0 {
+		t.Errorf("EnergyWh = %v after a 6h gap, want 0", snap.EnergyWh)
+	}
+}
+
+func TestEnergySkippedWithoutPowerReadings(t *testing.T) {
+	c := New("http://127.0.0.1:1", "")
+	snap := Snapshot{GPUs: []gpu.Device{{UtilPercent: 50, HasUtil: true}}}
+
+	c.accumulateEnergy(&snap, time.Now())
+	c.accumulateEnergy(&snap, time.Now().Add(time.Second))
+	if snap.HasEnergy {
+		t.Error("HasEnergy = true without any power readings")
 	}
 }

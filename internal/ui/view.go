@@ -60,6 +60,9 @@ func (m *model) View() string {
 
 	b.WriteString("\n")
 	b.WriteString(m.slotsView())
+	if m.snap.HasMetrics {
+		b.WriteString(m.totalsView())
+	}
 	b.WriteString(m.footerView())
 	return m.clamp(b.String())
 }
@@ -104,10 +107,12 @@ func (m *model) headerView() string {
 	}
 	head := p.Head.Render(title + strings.Repeat(" ", gap) + status)
 
-	sub := fmt.Sprintf("  %s   ctx %s/%s   llama.cpp %s   up %s   scrape %s",
+	// Context sizes are configuration values, so they are shown exactly as
+	// passed to -c rather than rounded, where 262144 would read as 262.1k.
+	sub := fmt.Sprintf("  %s   ctx %d/%d   llama.cpp %s   up %s   scrape %s",
 		m.collector.Endpoint(),
-		format.Count(float64(s.Model.Meta.NCtx)),
-		format.Count(float64(s.Model.Meta.NCtxTrain)),
+		s.Model.Meta.NCtx,
+		s.Model.Meta.NCtxTrain,
 		orDash(s.Props.BuildInfo),
 		format.Duration(m.collector.Uptime()),
 		s.ScrapeR.Round(time.Millisecond),
@@ -297,6 +302,29 @@ func (m *model) slotsView() string {
 	return b.String()
 }
 
+// totalsView renders lifetime counters: what the server has processed since it
+// started, as opposed to the rates above it.
+func (m *model) totalsView() string {
+	p := m.palette
+	mt := m.snap.Raw
+
+	parts := []string{
+		format.Count(mt.PredictedTokensTotal) + " generated",
+		format.Count(mt.PromptTokensTotal) + " prefilled",
+		format.Count(mt.PromptCachedTotal) + " cached",
+		format.Count(mt.DecodeTotal) + " decodes",
+	}
+	if saved := mt.PrefillTimeSaved(); saved > 0 {
+		parts = append(parts, "~"+format.Compact(saved)+" saved")
+	}
+	if m.snap.HasEnergy && m.snap.EnergyWh >= 0.05 {
+		parts = append(parts, fmt.Sprintf("%.1fWh", m.snap.EnergyWh))
+	}
+
+	return "\n  " + row(p, "TOTALS", labelCol,
+		p.Value.Render(strings.Join(parts, p.Muted.Render("  ")))) + "\n"
+}
+
 func (m *model) footerView() string {
 	p := m.palette
 	keys := []string{"q quit", "p pause", "+/- " + m.interval().String(), "s spec", "g gpu", "r refresh", "? help"}
@@ -332,6 +360,9 @@ func (m *model) helpView() string {
 		"                   position row shows where drafting stops paying off,",
 		"                   which is how to size the draft length.",
 		"  tok/J            decode tokens per joule of GPU energy.",
+		"  TOTALS           lifetime counters from the server, plus an estimate of",
+		"                   the prefill wall time the KV cache avoided and the GPU",
+		"                   energy ltop has observed since it started.",
 		"",
 		p.Muted.Render("press ? to return"),
 	}

@@ -39,6 +39,8 @@ type Collector struct {
 	lastPrefillRate float64
 	lastDecodeAt    time.Time
 	lastPrefillAt   time.Time
+	energyWh        float64
+	lastEnergyAt    time.Time
 
 	DecodeHist  *History
 	PrefillHist *History
@@ -85,6 +87,7 @@ func (c *Collector) Poll(ctx context.Context) Snapshot {
 	// dashboard stays useful while llama.cpp is restarting.
 	snap.Host = c.hostS.Sample()
 	snap.GPUs = c.gpus.Sample(ctx)
+	c.accumulateEnergy(&snap, start)
 
 	health, err := c.client.Health(ctx)
 	snap.ScrapeR = time.Since(start)
@@ -236,6 +239,30 @@ func contextPressure(slots []llama.Slot) float64 {
 		}
 	}
 	return worst
+}
+
+// accumulateEnergy integrates GPU power draw over the interval between polls.
+func (c *Collector) accumulateEnergy(snap *Snapshot, now time.Time) {
+	watts := 0.0
+	readable := false
+	for _, d := range snap.GPUs {
+		if d.HasPower {
+			watts += d.PowerWatts
+			readable = true
+		}
+	}
+	if !readable {
+		return
+	}
+	if !c.lastEnergyAt.IsZero() {
+		hours := now.Sub(c.lastEnergyAt).Hours()
+		// Guard against a suspended laptop reporting an enormous interval.
+		if hours > 0 && hours < 1 {
+			c.energyWh += watts * hours
+		}
+	}
+	c.lastEnergyAt = now
+	snap.EnergyWh, snap.HasEnergy = c.energyWh, true
 }
 
 // deriveEfficiency computes tokens generated per joule of GPU energy.

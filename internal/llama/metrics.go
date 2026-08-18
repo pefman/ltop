@@ -3,6 +3,7 @@ package llama
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pefman/ltop/internal/promparse"
 )
@@ -153,6 +154,17 @@ func (m Metrics) LifetimePromptTokensPerSec() float64 {
 // LifetimePredictedTokensPerSec is mean decode throughput since server start.
 func (m Metrics) LifetimePredictedTokensPerSec() float64 {
 	return safeDiv(m.PredictedTokensTotal, m.PredictedSecondsTotal)
+}
+
+// PrefillTimeSaved estimates the wall time the KV cache avoided, by valuing
+// every reused token at the server's own mean prefill rate. It is an estimate:
+// cached tokens would not necessarily have been prefilled at exactly that rate.
+func (m Metrics) PrefillTimeSaved() time.Duration {
+	rate := m.LifetimePromptTokensPerSec()
+	if rate <= 0 || m.PromptCachedTotal <= 0 {
+		return 0
+	}
+	return time.Duration(m.PromptCachedTotal / rate * float64(time.Second))
 }
 
 func safeDiv(a, b float64) float64 {

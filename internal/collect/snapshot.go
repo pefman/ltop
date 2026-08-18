@@ -62,6 +62,11 @@ type Snapshot struct {
 	TokensPerJoule float64
 	HasEfficiency  bool
 
+	// EnergyWh is GPU energy observed since ltop started, integrated from
+	// successive power readings. It covers ltop's session, not the server's.
+	EnergyWh  float64
+	HasEnergy bool
+
 	// Restarted reports that counters went backwards, meaning the server was
 	// restarted and history before this point is not comparable.
 	Restarted bool

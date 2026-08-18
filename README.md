@@ -9,7 +9,7 @@
 
 ```
  ltop v0.1.0  Qwen3.8-27B-UD-Q4_K_XL  Q4_K - Small  27.32B  16.7GiB      ● online
-  http://127.0.0.1:11436  ctx 140.0k/262.1k  llama.cpp b10430  up 4m12s  scrape 27ms
+  http://127.0.0.1:11436  ctx 140032/262144  llama.cpp b10430  up 4m12s  scrape 27ms
 
   GPU0      [||||||||||||||||||       ]    68%  23.4GiB of 24.0GiB  64°C  333/450W
     vram    [||||||||||||||||||||||||||] 97.5%  NVIDIA GeForce RTX 4090
@@ -29,6 +29,8 @@
 
   SLOT STATE    TASK          PROMPT     CACHED     CTX
   0    running  10050          51716      50750   36.9%  [||||        ]
+
+  TOTALS    59.5k generated  1.13M prefilled  6.04M cached  21.4k decodes  ~1h16m saved
 
   q quit   p pause   +/- 1s   s spec   g gpu   r refresh   ? help
 ```
@@ -125,6 +127,7 @@ ltop -once | grep 'hit rate'
 | **SPEC draft posN** | Share of drafts accepted at each depth. Where this falls off is your practical draft-length limit. |
 | **QUEUE** | Requests processing and deferred, plus busy slots per decode — how well batching is working. |
 | **tok/J** | Decode tokens per joule of GPU energy, for comparing quantisations and offload splits. Only reported while actively decoding. |
+| **TOTALS** | Lifetime counters from the server: tokens generated, prefilled, reused from cache, and `llama_decode()` calls. Plus an estimate of the prefill wall time the cache avoided, and the GPU energy ltop has observed since it started. |
 
 ## Configuration
 
