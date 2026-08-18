@@ -112,6 +112,7 @@ ltop -once | grep 'hit rate'
 | `s` | toggle the speculative decoding panel |
 | `g` | toggle the GPU panel |
 | `r` | force one refresh |
+| `z` | reset the stats window to now |
 | `?` | help |
 
 ## What the metrics mean
@@ -127,7 +128,7 @@ ltop -once | grep 'hit rate'
 | **SPEC draft posN** | Share of drafts accepted at each depth. Where this falls off is your practical draft-length limit. |
 | **QUEUE** | Requests processing and deferred, plus busy slots per decode — how well batching is working. |
 | **tok/J** | Decode tokens per joule of GPU energy, for comparing quantisations and offload splits. Only reported while actively decoding. |
-| **TOTALS** | Lifetime counters from the server: tokens generated, prefilled, reused from cache, and `llama_decode()` calls. Plus an estimate of the prefill wall time the cache avoided, and the GPU energy ltop has observed since it started. |
+| **TOTALS** | Lifetime counters from the server: tokens generated, prefilled, reused from cache, and `llama_decode()` calls. Plus an estimate of the prefill wall time the cache avoided, and the GPU energy ltop has observed since it started. Press `z` to count from now instead. |
 
 ## Configuration
 
@@ -141,6 +142,17 @@ ltop -once | grep 'hit rate'
 ```
 
 The endpoint is not read from the environment. Run `ltop -reconfigure` to change it.
+
+## Measuring a single run
+
+Press `z` to rebase the counters onto the current moment. The totals row switches
+to `SINCE z` and reports only what has happened since, along with how long the
+window has been open, so one workload can be measured without restarting the
+server. Cache hit rate and speculative acceptance follow the same window.
+
+llama.cpp cannot zero its own counters, so ltop records where they stood and
+reports the difference. If the server restarts while a window is open, the
+baseline is dropped rather than producing negative totals.
 
 ## Multiple models
 

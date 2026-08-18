@@ -167,6 +167,44 @@ func (m Metrics) PrefillTimeSaved() time.Duration {
 	return time.Duration(m.PromptCachedTotal / rate * float64(time.Second))
 }
 
+// Since returns these metrics measured from base rather than from server
+// start, for showing a fresh window without restarting llama.cpp.
+//
+// Only cumulative counters are rebased. Gauges describe the present moment and
+// TokensMax is a running maximum, so neither can be differenced meaningfully.
+func (m Metrics) Since(base Metrics) Metrics {
+	out := m
+	out.PromptTokensTotal = nonNegative(m.PromptTokensTotal - base.PromptTokensTotal)
+	out.PromptCachedTotal = nonNegative(m.PromptCachedTotal - base.PromptCachedTotal)
+	out.PromptSecondsTotal = nonNegative(m.PromptSecondsTotal - base.PromptSecondsTotal)
+	out.PredictedTokensTotal = nonNegative(m.PredictedTokensTotal - base.PredictedTokensTotal)
+	out.PredictedSecondsTotal = nonNegative(m.PredictedSecondsTotal - base.PredictedSecondsTotal)
+	out.DecodeTotal = nonNegative(m.DecodeTotal - base.DecodeTotal)
+
+	out.SpecDraftTokensTotal = nonNegative(m.SpecDraftTokensTotal - base.SpecDraftTokensTotal)
+	out.SpecAcceptedTokensTotal = nonNegative(m.SpecAcceptedTokensTotal - base.SpecAcceptedTokensTotal)
+	out.SpecDraftsTotal = nonNegative(m.SpecDraftsTotal - base.SpecDraftsTotal)
+
+	if len(base.SpecAcceptedPerPos) > 0 {
+		pos := make([]float64, len(m.SpecAcceptedPerPos))
+		for i, v := range m.SpecAcceptedPerPos {
+			if i < len(base.SpecAcceptedPerPos) {
+				v -= base.SpecAcceptedPerPos[i]
+			}
+			pos[i] = nonNegative(v)
+		}
+		out.SpecAcceptedPerPos = pos
+	}
+	return out
+}
+
+func nonNegative(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	return v
+}
+
 func safeDiv(a, b float64) float64 {
 	if b <= 0 {
 		return 0

@@ -236,3 +236,59 @@ func TestPrefillTimeSavedWithoutData(t *testing.T) {
 		t.Errorf("PrefillTimeSaved with no cache = %v, want 0", got)
 	}
 }
+
+func TestMetricsSince(t *testing.T) {
+	base := Metrics{
+		PromptTokensTotal: 100, PromptCachedTotal: 400, PromptSecondsTotal: 2,
+		PredictedTokensTotal: 50, PredictedSecondsTotal: 5, DecodeTotal: 30,
+		SpecDraftTokensTotal: 90, SpecAcceptedTokensTotal: 60, SpecDraftsTotal: 30,
+		SpecAcceptedPerPos: []float64{20, 15, 10},
+		TokensMax:          9000, RequestsProcessing: 1,
+	}
+	cur := Metrics{
+		PromptTokensTotal: 250, PromptCachedTotal: 900, PromptSecondsTotal: 5,
+		PredictedTokensTotal: 130, PredictedSecondsTotal: 13, DecodeTotal: 80,
+		SpecDraftTokensTotal: 190, SpecAcceptedTokensTotal: 130, SpecDraftsTotal: 70,
+		SpecAcceptedPerPos: []float64{50, 35, 22},
+		TokensMax:          12000, RequestsProcessing: 2,
+	}
+
+	got := cur.Since(base)
+
+	checks := map[string][2]float64{
+		"prompt":    {got.PromptTokensTotal, 150},
+		"cached":    {got.PromptCachedTotal, 500},
+		"predicted": {got.PredictedTokensTotal, 80},
+		"decodes":   {got.DecodeTotal, 50},
+		"draft":     {got.SpecDraftTokensTotal, 100},
+		"accepted":  {got.SpecAcceptedTokensTotal, 70},
+	}
+	for name, c := range checks {
+		if c[0] != c[1] {
+			t.Errorf("%s = %v, want %v", name, c[0], c[1])
+		}
+	}
+
+	// A running maximum and a point-in-time gauge cannot be differenced.
+	if got.TokensMax != 12000 {
+		t.Errorf("TokensMax = %v, want 12000 unchanged", got.TokensMax)
+	}
+	if got.RequestsProcessing != 2 {
+		t.Errorf("RequestsProcessing = %v, want 2 unchanged", got.RequestsProcessing)
+	}
+
+	want := []float64{30, 20, 12}
+	for i, w := range want {
+		if got.SpecAcceptedPerPos[i] != w {
+			t.Errorf("SpecAcceptedPerPos[%d] = %v, want %v", i, got.SpecAcceptedPerPos[i], w)
+		}
+	}
+}
+
+// Rebasing against a larger baseline must clamp rather than go negative.
+func TestMetricsSinceClampsAtZero(t *testing.T) {
+	got := Metrics{PredictedTokensTotal: 5}.Since(Metrics{PredictedTokensTotal: 100})
+	if got.PredictedTokensTotal != 0 {
+		t.Errorf("PredictedTokensTotal = %v, want 0", got.PredictedTokensTotal)
+	}
+}

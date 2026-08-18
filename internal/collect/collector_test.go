@@ -395,3 +395,77 @@ func TestEnergySkippedWithoutPowerReadings(t *testing.T) {
 		t.Error("HasEnergy = true without any power readings")
 	}
 }
+
+func TestResetStatsRebasesTotals(t *testing.T) {
+	f := newFakeServer(t)
+	c := New(f.URL, "")
+	ctx := context.Background()
+
+	f.setCounters(100, 1000, 10, 500, 1)
+	c.Poll(ctx)
+	f.setCounters(120, 1200, 14, 700, 2)
+	if snap := c.Poll(ctx); snap.Raw.PredictedTokensTotal != 1200 {
+		t.Fatalf("pre-reset total = %v, want 1200", snap.Raw.PredictedTokensTotal)
+	}
+
+	c.ResetStats()
+
+	// Same counters immediately after reset means nothing has happened yet.
+	snap := c.Poll(ctx)
+	if !snap.StatsReset {
+		t.Fatal("StatsReset = false after ResetStats")
+	}
+	if snap.Raw.PredictedTokensTotal != 0 {
+		t.Errorf("generated = %v just after reset, want 0", snap.Raw.PredictedTokensTotal)
+	}
+	if snap.Raw.DecodeTotal != 0 {
+		t.Errorf("decodes = %v just after reset, want 0", snap.Raw.DecodeTotal)
+	}
+
+	// Further work counts from the baseline, not from server start.
+	f.setCounters(140, 1500, 20, 900, 3)
+	snap = c.Poll(ctx)
+	if got := snap.Raw.PredictedTokensTotal; got != 300 {
+		t.Errorf("generated = %v, want 300 (1500-1200)", got)
+	}
+	if got := snap.Raw.PromptTokensTotal; got != 200 {
+		t.Errorf("prefilled = %v, want 200 (900-700)", got)
+	}
+	if got := snap.Raw.DecodeTotal; got != 20 {
+		t.Errorf("decodes = %v, want 20 (140-120)", got)
+	}
+	if snap.StatsSince <= 0 {
+		t.Error("StatsSince did not advance")
+	}
+}
+
+// A restart zeroes the server's counters, so a baseline taken against the old
+// ones would make every total negative.
+func TestServerRestartClearsBaseline(t *testing.T) {
+	f := newFakeServer(t)
+	c := New(f.URL, "")
+	ctx := context.Background()
+
+	f.setCounters(100, 1000, 10, 500, 1)
+	c.Poll(ctx)
+	f.setCounters(120, 1200, 14, 700, 2)
+	c.Poll(ctx)
+	c.ResetStats()
+
+	f.setCounters(3, 20, 0.5, 10, 0.2)
+	snap := c.Poll(ctx)
+
+	if !snap.Restarted {
+		t.Error("Restarted = false after counters went backwards")
+	}
+	if snap.StatsReset {
+		t.Error("StatsReset still true after a server restart")
+	}
+
+	f.setCounters(5, 40, 1, 20, 0.4)
+	snap = c.Poll(ctx)
+	if snap.Raw.PredictedTokensTotal != 40 {
+		t.Errorf("generated = %v, want the absolute 40 after baseline was dropped",
+			snap.Raw.PredictedTokensTotal)
+	}
+}

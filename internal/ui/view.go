@@ -308,6 +308,11 @@ func (m *model) totalsView() string {
 	p := m.palette
 	mt := m.snap.Raw
 
+	label := "TOTALS"
+	if m.snap.StatsReset {
+		label = "SINCE z"
+	}
+
 	parts := []string{
 		format.Count(mt.PredictedTokensTotal) + " generated",
 		format.Count(mt.PromptTokensTotal) + " prefilled",
@@ -320,14 +325,17 @@ func (m *model) totalsView() string {
 	if m.snap.HasEnergy && m.snap.EnergyWh >= 0.05 {
 		parts = append(parts, fmt.Sprintf("%.1fWh", m.snap.EnergyWh))
 	}
+	if m.snap.StatsReset {
+		parts = append(parts, "over "+format.Compact(m.snap.StatsSince))
+	}
 
-	return "\n  " + row(p, "TOTALS", labelCol,
+	return "\n  " + row(p, label, labelCol,
 		p.Value.Render(strings.Join(parts, p.Muted.Render("  ")))) + "\n"
 }
 
 func (m *model) footerView() string {
 	p := m.palette
-	keys := []string{"q quit", "p pause", "+/- " + m.interval().String(), "s spec", "g gpu", "r refresh", "? help"}
+	keys := []string{"q quit", "p pause", "+/- " + m.interval().String(), "s spec", "g gpu", "r refresh", "z reset", "? help"}
 	return "\n" + p.KeyHint.Render(pad("  "+strings.Join(keys, "   "), m.width))
 }
 
@@ -343,6 +351,7 @@ func (m *model) helpView() string {
 		"  s            toggle the speculative decoding panel",
 		"  g            toggle the GPU panel",
 		"  r            force one refresh",
+		"  z            reset the stats window to now",
 		"  ?            close this help",
 		"",
 		p.Label.Render("METRICS"),
@@ -363,6 +372,9 @@ func (m *model) helpView() string {
 		"  TOTALS           lifetime counters from the server, plus an estimate of",
 		"                   the prefill wall time the KV cache avoided and the GPU",
 		"                   energy ltop has observed since it started.",
+		"                   Press z to count from now instead; llama.cpp cannot",
+		"                   zero its own counters, so ltop records a baseline and",
+		"                   reports the difference. Cache and spec rates follow.",
 		"",
 		p.Muted.Render("press ? to return"),
 	}

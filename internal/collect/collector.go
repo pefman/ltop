@@ -41,6 +41,10 @@ type Collector struct {
 	lastPrefillAt   time.Time
 	energyWh        float64
 	lastEnergyAt    time.Time
+	baseline        llama.Metrics
+	baselineSet     bool
+	baselineAt      time.Time
+	baselineEnergy  float64
 
 	DecodeHist  *History
 	PrefillHist *History
@@ -62,6 +66,22 @@ func New(endpoint, apiKey string) *Collector {
 
 // Uptime is how long ltop has been observing this server.
 func (c *Collector) Uptime() time.Duration { return time.Since(c.startAt) }
+
+// ResetStats rebases the totals onto the current counter values.
+//
+// llama.cpp offers no way to zero its own counters, so ltop records where they
+// stand and reports the difference from here on, letting a single workload be
+// measured without restarting the server.
+func (c *Collector) ResetStats() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.baseline, c.baselineSet, c.baselineAt = c.prev, c.havePrev, time.Now()
+	c.baselineEnergy = c.energyWh
+	// prev is deliberately kept: rates and restart detection compare against
+	// the server's absolute counters and are unaffected by the display window.
+	c.clearHistory()
+}
 
 // Endpoint returns the server root being polled.
 func (c *Collector) Endpoint() string { return c.client.BaseURL() }
@@ -99,9 +119,16 @@ func (c *Collector) Poll(ctx context.Context) Snapshot {
 	snap.Online = true
 	snap.Loading = health.Loading()
 
+	var absolute llama.Metrics
 	if set, err := c.client.Metrics(ctx); err == nil {
-		snap.Raw = llama.ParseMetrics(set)
+		absolute = llama.ParseMetrics(set)
+		snap.Raw = absolute
 		snap.HasMetrics = true
+		if c.baselineSet {
+			snap.Raw = absolute.Since(c.baseline)
+			snap.StatsReset = true
+			snap.StatsSince = start.Sub(c.baselineAt)
+		}
 	} else if !errors.Is(err, llama.ErrEndpointDisabled) {
 		snap.Err = err
 	}
@@ -120,14 +147,14 @@ func (c *Collector) Poll(ctx context.Context) Snapshot {
 	snap.ContextPressure = contextPressure(snap.Slots)
 
 	if snap.HasMetrics {
-		c.deriveRates(&snap, start)
+		c.deriveRates(&snap, start, absolute)
 		deriveEfficiency(&snap)
 
 		c.DecodeHist.Push(snap.DecodeTokensPerSec)
 		c.PrefillHist.Push(snap.PrefillTokensPerSec)
 		c.StepHist.Push(snap.DecodeStepsPerSec)
 
-		c.prev, c.prevAt, c.havePrev = snap.Raw, start, true
+		c.prev, c.prevAt, c.havePrev = absolute, start, true
 	}
 	snap.ScrapeR = time.Since(start)
 	return snap
@@ -140,14 +167,17 @@ func (c *Collector) Poll(ctx context.Context) Snapshot {
 // request finishes. Between completions those counters are frozen, so the
 // measured tok/s is carried forward with an age rather than falling to zero,
 // and n_decode_total supplies the live activity signal in the meantime.
-func (c *Collector) deriveRates(snap *Snapshot, now time.Time) {
+func (c *Collector) deriveRates(snap *Snapshot, now time.Time, cur llama.Metrics) {
 	if !c.havePrev {
 		return
 	}
 
-	cur := snap.Raw
 	if counterWentBackwards(c.prev, cur) {
 		snap.Restarted = true
+		// A restart zeroes the server's counters, so any baseline taken
+		// against the old ones would make every total negative.
+		c.baselineSet = false
+		snap.StatsReset = false
 		c.reset()
 		return
 	}
@@ -191,10 +221,16 @@ func (c *Collector) deriveRates(snap *Snapshot, now time.Time) {
 }
 
 func (c *Collector) reset() {
+	c.clearHistory()
+	c.havePrev = false
+}
+
+// clearHistory drops the sparklines and held rates without discarding the
+// counter baseline that rate derivation depends on.
+func (c *Collector) clearHistory() {
 	c.DecodeHist.Reset()
 	c.PrefillHist.Reset()
 	c.StepHist.Reset()
-	c.havePrev = false
 	c.lastDecodeAt = time.Time{}
 	c.lastPrefillAt = time.Time{}
 	c.lastDecodeRate = 0
@@ -262,7 +298,7 @@ func (c *Collector) accumulateEnergy(snap *Snapshot, now time.Time) {
 		}
 	}
 	c.lastEnergyAt = now
-	snap.EnergyWh, snap.HasEnergy = c.energyWh, true
+	snap.EnergyWh, snap.HasEnergy = c.energyWh-c.baselineEnergy, true
 }
 
 // deriveEfficiency computes tokens generated per joule of GPU energy.

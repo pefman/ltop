@@ -136,6 +136,11 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !m.paused {
 			return m, m.poll()
 		}
+	case "z":
+		m.collector.ResetStats()
+		if !m.paused {
+			return m, m.poll()
+		}
 	}
 	return m, nil
 }

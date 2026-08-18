@@ -67,6 +67,12 @@ type Snapshot struct {
 	EnergyWh  float64
 	HasEnergy bool
 
+	// StatsReset reports that totals are counted from a user-requested
+	// baseline rather than from server start, and StatsSince is how long ago
+	// that baseline was taken.
+	StatsReset bool
+	StatsSince time.Duration
+
 	// Restarted reports that counters went backwards, meaning the server was
 	// restarted and history before this point is not comparable.
 	Restarted bool

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/pefman/ltop/internal/collect"
 	"github.com/pefman/ltop/internal/gpu"
 	"github.com/pefman/ltop/internal/host"
@@ -228,5 +230,35 @@ func TestTotalsHiddenWithoutMetrics(t *testing.T) {
 
 	if strings.Contains(m.View(), "TOTALS") {
 		t.Error("totals rendered without metrics")
+	}
+}
+
+// The totals row must say when it is counting from a reset rather than from
+// server start, or a small number looks like an idle server.
+func TestTotalsLabelChangesAfterReset(t *testing.T) {
+	m := newTestModel(t, 110)
+	snap := sampleSnapshot()
+	snap.StatsReset = true
+	snap.StatsSince = 5 * time.Minute
+	m.snap = snap
+
+	out := m.View()
+	if !strings.Contains(out, "SINCE") {
+		t.Error("reset totals not labelled")
+	}
+	if !strings.Contains(out, "over 5m") {
+		t.Errorf("reset window not shown:\n%s", out)
+	}
+	if !strings.Contains(out, "z reset") {
+		t.Error("z key missing from footer")
+	}
+}
+
+func TestResetKeyInvokesCollector(t *testing.T) {
+	m := newTestModel(t, 100)
+	m.paused = true // keeps the handler from firing a poll
+
+	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")}); cmd != nil {
+		t.Error("reset issued a poll while paused")
 	}
 }
