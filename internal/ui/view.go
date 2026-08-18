@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/pefman/ltop/internal/collect"
 	"github.com/pefman/ltop/internal/format"
 	"github.com/pefman/ltop/internal/gpu"
 )
@@ -152,7 +151,7 @@ func gpuRow(p Palette, d gpu.Device, w, total int) string {
 	line := "  " + row(p, name, labelCol, gauge(p, d.UtilPercent/100, w, label)) + "\n"
 
 	if d.HasMem {
-		vramLabel := fmt.Sprintf("%5.1f%%  vram  %s", d.MemPercent()*100, format.Truncate(d.Name, 28))
+		vramLabel := fmt.Sprintf("%5.1f%%  %s", d.MemPercent()*100, format.Truncate(d.Name, 28))
 		line += "  " + row(p, "  vram", labelCol, gauge(p, d.MemPercent(), w, vramLabel)) + "\n"
 	}
 	return line
@@ -165,9 +164,13 @@ func (m *model) throughputView() string {
 
 	var b strings.Builder
 
+	liveStyle := p.Accent
+	if s.DecodeStepsPerSec <= 0 {
+		liveStyle = p.Muted
+	}
 	live := fmt.Sprintf("%7.1f steps/s", s.DecodeStepsPerSec)
 	b.WriteString("  " + row(p, "DECODE", labelCol,
-		p.Accent.Render(live)+"  "+sparkline(p, m.collector.StepHist.Values(), sparkW)) + "\n")
+		liveStyle.Render(live)+"  "+sparkline(p, m.collector.StepHist.Values(), sparkW)) + "\n")
 
 	b.WriteString("  " + row(p, "  tok/s", labelCol,
 		measuredLabel(p, s.DecodeTokensPerSec, s.DecodeAge, s.HasDecodeMeasured)+
@@ -338,8 +341,8 @@ func (m *model) sparkWidth() int {
 	if w < 8 {
 		w = 8
 	}
-	if w > collect.HistorySize {
-		w = collect.HistorySize
+	if w > 80 {
+		w = 80
 	}
 	return w
 }
