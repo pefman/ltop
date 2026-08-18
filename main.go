@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/pefman/ltop/internal/buildinfo"
 	"github.com/pefman/ltop/internal/config"
 	"github.com/pefman/ltop/internal/ui"
 )
@@ -18,8 +19,14 @@ import (
 func main() {
 	once := flag.Bool("once", false, "print a single plain-text snapshot and exit")
 	reconfigure := flag.Bool("reconfigure", false, "re-run endpoint discovery and save a new endpoint")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = usage
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("ltop", buildinfo.Version)
+		return
+	}
 
 	if runtime.GOOS != "linux" {
 		fmt.Fprintln(os.Stderr, "ltop: Linux only")
@@ -71,6 +78,7 @@ Usage:
 Flags:
   -once          print a single plain-text snapshot and exit
   -reconfigure   re-run endpoint discovery and save a new endpoint
+  -version       print the version and exit
 
 The endpoint is discovered on first run and stored in the config file; it is
 not read from the environment.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/pefman/ltop/internal/buildinfo"
 	"github.com/pefman/ltop/internal/format"
 	"github.com/pefman/ltop/internal/gpu"
 )
@@ -78,7 +79,7 @@ func (m *model) headerView() string {
 	if name == "" {
 		name = "unknown model"
 	}
-	title := " ltop  " + name
+	title := " ltop " + buildinfo.Version + "  " + name
 	if meta := s.Model.Meta; meta.NParams > 0 {
 		title += fmt.Sprintf("  %s  %s  %s",
 			meta.FType, format.Count(float64(meta.NParams)), format.Bytes(uint64(meta.Size)))
@@ -103,7 +104,7 @@ func (m *model) headerView() string {
 	}
 	head := p.Head.Render(title + strings.Repeat(" ", gap) + status)
 
-	sub := fmt.Sprintf("  %s   ctx %s/%s   build %s   up %s   scrape %s",
+	sub := fmt.Sprintf("  %s   ctx %s/%s   llama.cpp %s   up %s   scrape %s",
 		m.collector.Endpoint(),
 		format.Count(float64(s.Model.Meta.NCtx)),
 		format.Count(float64(s.Model.Meta.NCtxTrain)),

@@ -40,7 +40,7 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 
 	section(out, "server")
 	kv(out, "endpoint", endpoint)
-	kv(out, "build", p.BuildInfo)
+	kv(out, "llama.cpp build", p.BuildInfo)
 	kv(out, "scrape", s.ScrapeR.Round(time.Microsecond).String())
 	kv(out, "sleeping", fmt.Sprint(p.IsSleeping))
 	kv(out, "metrics", available(s.HasMetrics, "start llama-server with --metrics"))

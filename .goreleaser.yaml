@@ -1,0 +1,77 @@
+version: 2
+
+project_name: ltop
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: ltop
+    main: .
+    binary: ltop
+    env:
+      - CGO_ENABLED=0
+    # ltop reads /proc and /sys directly, so Linux is the only target.
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/pefman/ltop/internal/buildinfo.Version={{ .Version }}
+
+archives:
+  - id: ltop
+    ids:
+      - ltop
+    # No version in the name, so the /releases/latest/download URL is stable.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 99
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: pefman
+    name: ltop
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Install
+
+    ```
+    curl -sSL https://github.com/pefman/ltop/releases/latest/download/ltop_linux_amd64.tar.gz | tar xz
+    install -Dm755 ltop ~/.local/bin/ltop
+    ```
+
+    Or build from source: `git clone https://github.com/pefman/ltop && cd ltop && ./install.sh`
