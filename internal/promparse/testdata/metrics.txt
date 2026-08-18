@@ -1,0 +1,22 @@
+# HELP llamacpp:prompt_tokens_total Number of prompt tokens processed, excluding cached tokens
+# TYPE llamacpp:prompt_tokens_total counter
+llamacpp:prompt_tokens_total 201641
+# HELP llamacpp:prompt_tokens_cached_total Number of prompt tokens reused from the cache
+# TYPE llamacpp:prompt_tokens_cached_total counter
+llamacpp:prompt_tokens_cached_total 615171
+llamacpp:prompt_seconds_total 160.826
+llamacpp:tokens_predicted_total 8697
+llamacpp:tokens_predicted_seconds_total 250.856
+llamacpp:n_decode_total 3280
+llamacpp:n_tokens_max 140031
+llamacpp:spec_decode_num_draft_tokens_total 9405
+llamacpp:spec_decode_num_accepted_tokens_total 5542
+llamacpp:spec_decode_num_drafts_total 3139
+llamacpp:prompt_tokens_seconds 1594.22
+llamacpp:predicted_tokens_seconds 35.3447
+llamacpp:requests_processing 1
+llamacpp:requests_deferred 0
+llamacpp:n_busy_slots_per_decode 1
+llamacpp:spec_decode_num_accepted_tokens_per_pos_total{position="0"} 2368
+llamacpp:spec_decode_num_accepted_tokens_per_pos_total{position="1"} 1789
+llamacpp:spec_decode_num_accepted_tokens_per_pos_total{position="2"} 1385
