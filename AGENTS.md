@@ -33,8 +33,14 @@ One renamed asset on a future release breaks every older updater.
 - Stamping `internal/buildinfo.Version` from the tag (`0.2.0`, never `dev` for a release). Dirty / `git describe` builds do not self-update.
 - The release workflow step that runs `genmanifest` and uploads `update.json`. GoReleaser does not publish that file by itself.
 - Tag shape: `v*` so `.github/workflows/release.yml` fires.
+- Never open the running binary with `O_WRONLY`. Linux returns `ETXTBSY`
+  ("text file busy"). Replace by writing a sibling `ltop.new` and renaming
+  the live inode aside (`ltop` → `ltop.bak`, then `ltop.new` → `ltop`).
+  `v0.2.0`/`v0.2.1` still have the old check and cannot `u` themselves
+  onto a later build; those need a one-time manual install.
 
-The original GitHub **v0.1.0** binary cannot self-update (no updater). From **v0.2.0** onward, breaking the list above is what bricks upgrades.
+The original GitHub **v0.1.0** binary cannot self-update (no updater). From
+**v0.2.2** onward, breaking the list above is what bricks upgrades.
 
 Canonical comments live in `internal/update/protocol.go`. CI pins the GoReleaser name templates in `internal/update/contract_test.go`. `genmanifest` refuses to upload if either Linux arch is missing.
 
