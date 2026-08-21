@@ -38,7 +38,7 @@ func (c *Client) Apply(ctx context.Context, av *Available) error {
 	if err != nil {
 		return err
 	}
-	if err := writable(exe); err != nil {
+	if err := writableDir(filepath.Dir(exe)); err != nil {
 		return err
 	}
 
@@ -105,12 +105,18 @@ func (c *Client) exe() (string, error) {
 	return path, nil
 }
 
-func writable(path string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+// writableDir checks that we can create a sibling file. Opening the running
+// binary itself with O_WRONLY fails on Linux with ETXTBSY; rename-aside
+// of that inode is what actually replaces it.
+func writableDir(dir string) error {
+	f, err := os.CreateTemp(dir, ".ltop-write-*")
 	if err != nil {
-		return fmt.Errorf("cannot overwrite %s: %w", path, err)
+		return fmt.Errorf("cannot write to %s: %w", dir, err)
 	}
-	return f.Close()
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return nil
 }
 
 func extractBinary(archive []byte) ([]byte, error) {
