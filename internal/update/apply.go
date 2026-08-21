@@ -24,62 +24,66 @@ const (
 
 var errChecksum = errors.New("sha256 mismatch")
 
-// Apply downloads, verifies, and replaces the running binary. On success it
-// execs the new file unless NoExec is set (tests). The previous binary is
-// kept next to it as <name>.bak so a failed exec can be rolled back.
-func (c *Client) Apply(ctx context.Context, av *Available) error {
+// Apply downloads, verifies, and replaces the running binary. It returns the
+// path that now holds the new file. Callers must exec that path — not
+// os.Executable(), which after the rename points at <name>.bak (the old
+// inode) and would restart the previous version in a loop.
+//
+// On success it execs the new file unless NoExec is set (tests). The previous
+// binary is kept next to it as <name>.bak so a failed exec can be rolled back.
+func (c *Client) Apply(ctx context.Context, av *Available) (string, error) {
 	if av == nil || av.Asset.Name == "" || av.Asset.SHA256 == "" {
-		return fmt.Errorf("no update to apply")
+		return "", fmt.Errorf("no update to apply")
 	}
 	ctx, cancel := context.WithTimeout(ctx, applyTimeout)
 	defer cancel()
 
 	exe, err := c.exe()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := writableDir(filepath.Dir(exe)); err != nil {
-		return err
+		return "", err
 	}
 
 	url := strings.TrimRight(av.Base, "/") + "/" + av.Asset.Name
 	body, status, err := c.get(ctx, url, maxArchive)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if status != 200 {
-		return fmt.Errorf("download: HTTP %d", status)
+		return "", fmt.Errorf("download: HTTP %d", status)
 	}
 	sum := sha256.Sum256(body)
 	if hex.EncodeToString(sum[:]) != strings.ToLower(av.Asset.SHA256) {
-		return errChecksum
+		return "", errChecksum
 	}
 	bin, err := extractBinary(body)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	bak := exe + ".bak"
 	tmp := exe + ".new"
 	if err := os.WriteFile(tmp, bin, 0o755); err != nil {
-		return err
+		return "", err
 	}
 	if err := os.Rename(exe, bak); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("backup current binary: %w", err)
+		return "", fmt.Errorf("backup current binary: %w", err)
 	}
 	if err := os.Rename(tmp, exe); err != nil {
 		_ = os.Rename(bak, exe)
 		os.Remove(tmp)
-		return fmt.Errorf("install new binary: %w", err)
+		return "", fmt.Errorf("install new binary: %w", err)
 	}
 
 	if c.NoExec {
-		return nil
+		return exe, nil
 	}
 	err = syscall.Exec(exe, os.Args, os.Environ())
 	_ = os.Rename(bak, exe)
-	return err
+	return "", err
 }
 
 func (c *Client) exe() (string, error) {

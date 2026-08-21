@@ -419,6 +419,28 @@ func TestUpdateBannerAndInstallKey(t *testing.T) {
 	}
 }
 
+func TestUpdateDoneRestartsInstalledPath(t *testing.T) {
+	m := newTestModel(t, 100)
+	m.update = &update.Available{Version: "9.9.9"}
+	next, cmd := m.Update(updateDoneMsg{exe: "/opt/ltop"})
+	got := next.(*model)
+	if got.restartTo != "/opt/ltop" {
+		t.Errorf("restartTo = %q, want the path Apply returned, not os.Executable", got.restartTo)
+	}
+	if cmd == nil {
+		t.Fatal("expected tea.Quit after a successful install")
+	}
+}
+
+func TestShiftUStartsInstall(t *testing.T) {
+	m := newTestModel(t, 100)
+	m.update = &update.Available{Version: "9.9.9"}
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("U")})
+	if !m.updating || cmd == nil {
+		t.Error("U should start the install the same as u")
+	}
+}
+
 func TestUpdateFailureShowsManualInstall(t *testing.T) {
 	m := newTestModel(t, 160)
 	m.updateErr = errTest{}

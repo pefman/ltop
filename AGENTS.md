@@ -36,8 +36,11 @@ One renamed asset on a future release breaks every older updater.
 - Never open the running binary with `O_WRONLY`. Linux returns `ETXTBSY`
   ("text file busy"). Replace by writing a sibling `ltop.new` and renaming
   the live inode aside (`ltop` → `ltop.bak`, then `ltop.new` → `ltop`).
-  `v0.2.0`/`v0.2.1` still have the old check and cannot `u` themselves
-  onto a later build; those need a one-time manual install.
+  After that rename, `os.Executable()` / `/proc/self/exe` points at
+  `ltop.bak`. Restart via the original path (now the new inode), never
+  `os.Executable()`. Restarting `.bak` re-launches the old version and
+  the update banner loops. `v0.2.0`–`v0.2.5` need a one-time manual
+  install to pick up these apply fixes.
 
 The original GitHub **v0.1.0** binary cannot self-update (no updater). From
 **v0.2.2** onward, breaking the list above is what bricks upgrades.

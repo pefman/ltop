@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
@@ -143,6 +142,7 @@ type updateMsg struct {
 
 type updateDoneMsg struct {
 	err error
+	exe string
 }
 
 // poll runs one scrape off the UI goroutine.
@@ -191,15 +191,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateErr = msg.err
 			return m, nil
 		}
-		exe, err := os.Executable()
-		if err != nil {
-			m.updateErr = err
+		if msg.exe == "" {
+			m.updateErr = fmt.Errorf("update installed but restart path is empty")
 			return m, nil
 		}
-		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-			exe = resolved
-		}
-		m.restartTo = exe
+		m.restartTo = msg.exe
 		return m, tea.Quit
 	}
 	return m, nil
@@ -212,7 +208,7 @@ func (m *model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc", "ctrl+c":
 		return m, tea.Quit
-	case "u":
+	case "u", "U":
 		if m.update == nil {
 			return m, nil
 		}
@@ -273,7 +269,8 @@ func (m *model) installUpdate() tea.Cmd {
 			UserAgent: "ltop/" + buildinfo.Version,
 			NoExec:    true,
 		}
-		return updateDoneMsg{err: c.Apply(context.Background(), av)}
+		path, err := c.Apply(context.Background(), av)
+		return updateDoneMsg{err: err, exe: path}
 	}
 }
 
