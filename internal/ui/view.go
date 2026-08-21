@@ -25,6 +25,7 @@ func (m *model) View() string {
 
 	b.WriteString(m.headerView())
 	b.WriteString("\n")
+	b.WriteString(m.updateBanner())
 
 	if !m.snap.Online {
 		b.WriteString(m.offlineView())
@@ -61,7 +62,8 @@ func (m *model) View() string {
 	b.WriteString("\n")
 	b.WriteString(m.slotsView())
 	if m.snap.HasMetrics {
-		b.WriteString(m.totalsView())
+		b.WriteString(m.statsView())
+		b.WriteString(m.costsView())
 	}
 	b.WriteString(m.footerView())
 	return m.clamp(b.String())
@@ -120,6 +122,27 @@ func (m *model) headerView() string {
 	return head + "\n" + p.Muted.Render(format.Truncate(sub, m.width)) + "\n"
 }
 
+func (m *model) updateBanner() string {
+	if m.update == nil && m.updateErr == nil && !m.updating {
+		return ""
+	}
+	p := m.palette
+	switch {
+	case m.updating && m.update != nil:
+		return p.Warn.Render(format.Truncate("  installing v"+m.update.Version+"…", m.width)) + "\n"
+	case m.updateErr != nil:
+		return p.Err.Render(format.Truncate("  update failed: "+m.updateErr.Error(), m.width)) + "\n"
+	case m.update != nil:
+		msg := "  update v" + m.update.Version + " ready   press u to install"
+		style := p.Warn
+		if m.updateBlink {
+			style = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("0")).Background(lipgloss.Color("214"))
+		}
+		return style.Render(pad(format.Truncate(msg, m.width), m.width)) + "\n"
+	}
+	return ""
+}
+
 func (m *model) offlineView() string {
 	p := m.palette
 	msg := "server unreachable"
@@ -142,7 +165,12 @@ func (m *model) resourceView() string {
 	var b strings.Builder
 	if m.showGPU {
 		for _, d := range s.GPUs {
-			b.WriteString(gpuRow(p, d, w, m.width))
+			wh := 0.0
+			if s.GPUEnergyWh != nil {
+				wh = s.GPUEnergyWh[d.Index]
+			}
+			cost := format.EnergyCostEUR(wh, m.priceEUR())
+			b.WriteString(gpuRow(p, d, w, m.width, cost, m.currency()))
 		}
 	}
 
@@ -155,7 +183,7 @@ func (m *model) resourceView() string {
 	return b.String()
 }
 
-func gpuRow(p Palette, d gpu.Device, w, total int) string {
+func gpuRow(p Palette, d gpu.Device, w, total int, cost float64, cur format.Currency) string {
 	label := fmt.Sprintf("%5.0f%%", d.UtilPercent)
 	if d.HasMem {
 		label += fmt.Sprintf("  %s of %s", format.Bytes(d.MemUsedBytes), format.Bytes(d.MemTotalBytes))
@@ -164,7 +192,7 @@ func gpuRow(p Palette, d gpu.Device, w, total int) string {
 		label += fmt.Sprintf("  %.0f°C", d.TempCelsius)
 	}
 	if d.HasPower {
-		label += fmt.Sprintf("  %.0f/%.0fW", d.PowerWatts, d.PowerLimitWatts)
+		label += fmt.Sprintf("  %.0f/%.0fW  %s", d.PowerWatts, d.PowerLimitWatts, cur.Format(cost))
 	}
 
 	name := fmt.Sprintf("GPU%d", d.Index)
@@ -202,9 +230,6 @@ func (m *model) throughputView() string {
 
 	queue := fmt.Sprintf("%.0f processing   %.0f deferred   %.2f slots/decode",
 		s.Raw.RequestsProcessing, s.Raw.RequestsDeferred, s.Raw.BusySlotsPerDecode)
-	if s.HasEfficiency {
-		queue += fmt.Sprintf("   %.3f tok/J", s.TokensPerJoule)
-	}
 	b.WriteString("  " + row(p, "QUEUE", labelCol, p.Value.Render(queue)) + "\n")
 	return b.String()
 }
@@ -302,13 +327,13 @@ func (m *model) slotsView() string {
 	return b.String()
 }
 
-// totalsView renders lifetime counters: what the server has processed since it
+// statsView renders lifetime counters: what the server has processed since it
 // started, as opposed to the rates above it.
-func (m *model) totalsView() string {
+func (m *model) statsView() string {
 	p := m.palette
 	mt := m.snap.Raw
 
-	label := "TOTALS"
+	label := "STATS"
 	if m.snap.StatsReset {
 		label = "SINCE z"
 	}
@@ -322,9 +347,6 @@ func (m *model) totalsView() string {
 	if saved := mt.PrefillTimeSaved(); saved > 0 {
 		parts = append(parts, "~"+format.Compact(saved)+" saved")
 	}
-	if m.snap.HasEnergy && m.snap.EnergyWh >= 0.05 {
-		parts = append(parts, fmt.Sprintf("%.1fWh", m.snap.EnergyWh))
-	}
 	if m.snap.StatsReset {
 		parts = append(parts, "over "+format.Compact(m.snap.StatsSince))
 	}
@@ -333,9 +355,43 @@ func (m *model) totalsView() string {
 		p.Value.Render(strings.Join(parts, p.Muted.Render("  ")))) + "\n"
 }
 
+// costsView renders session energy, the running electricity bill, and the
+// tariff the w/W and c/C keys adjust.
+func (m *model) costsView() string {
+	p := m.palette
+	cost := format.EnergyCostEUR(m.snap.EnergyWh, m.priceEUR())
+	cur := m.currency()
+
+	parts := make([]string, 0, 5)
+	if m.snap.HasEnergy {
+		parts = append(parts, fmt.Sprintf("%.1fWh", m.snap.EnergyWh))
+	}
+	parts = append(parts, cur.Format(cost), cur.Tariff(m.priceEUR()), cur.Code)
+	if m.snap.HasEfficiency {
+		parts = append(parts, fmt.Sprintf("%.3f tok/J", m.snap.TokensPerJoule))
+	}
+
+	return "  " + row(p, "COSTS", labelCol,
+		p.Value.Render(strings.Join(parts, p.Muted.Render("  ")))) + "\n"
+}
+
 func (m *model) footerView() string {
 	p := m.palette
-	keys := []string{"q quit", "p pause", "+/- " + m.interval().String(), "s spec", "g gpu", "r refresh", "z reset", "? help"}
+	keys := []string{
+		"q quit",
+		"p pause",
+		"+/- " + m.interval().String(),
+		"s spec",
+		"g gpu",
+		"r refresh",
+		"z reset",
+		"w/W price",
+		"c currency",
+		"? help",
+	}
+	if m.update != nil {
+		keys = append(keys[:len(keys)-1], "u update", "? help")
+	}
 	return "\n" + p.KeyHint.Render(pad("  "+strings.Join(keys, "   "), m.width))
 }
 
@@ -351,7 +407,10 @@ func (m *model) helpView() string {
 		"  s            toggle the speculative decoding panel",
 		"  g            toggle the GPU panel",
 		"  r            force one refresh",
+		"  u            install a pending self-update (when advertised)",
 		"  z            reset the stats window to now",
+		"  w / W        raise / lower electricity price by 0.10/kWh",
+		"  c / C        cycle electricity currency (EUR, USD, GBP, SEK, …)",
 		"  ?            close this help",
 		"",
 		p.Label.Render("METRICS"),
@@ -369,12 +428,15 @@ func (m *model) helpView() string {
 		"                   position row shows where drafting stops paying off,",
 		"                   which is how to size the draft length.",
 		"  tok/J            decode tokens per joule of GPU energy.",
-		"  TOTALS           lifetime counters from the server, plus an estimate of",
-		"                   the prefill wall time the KV cache avoided and the GPU",
-		"                   energy ltop has observed since it started.",
+		"  STATS            lifetime counters from the server, plus an estimate of",
+		"                   the prefill wall time the KV cache avoided.",
 		"                   Press z to count from now instead; llama.cpp cannot",
 		"                   zero its own counters, so ltop records a baseline and",
 		"                   reports the difference. Cache and spec rates follow.",
+		"  COSTS            GPU energy observed this session, the running bill at",
+		"                   the current /kWh tariff, and tok/J while decoding.",
+		"                   w/W steps the tariff by 0.10; c/C cycles currency.",
+		"                   Each GPU also shows its own running cost next to watts.",
 		"",
 		p.Muted.Render("press ? to return"),
 	}

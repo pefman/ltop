@@ -16,7 +16,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("Load on empty dir = %v, want ErrNotFound", err)
 	}
 
-	want := Config{Endpoint: "http://127.0.0.1:11436", PollIntervalMS: 500}
+	want := Config{
+		Endpoint:       "http://127.0.0.1:11436",
+		PollIntervalMS: 500,
+		Currency:       "SEK",
+		KWhPrice:       1.5,
+	}
 	if err := Save(want); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -25,7 +30,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.Endpoint != want.Endpoint || got.PollIntervalMS != want.PollIntervalMS {
+	if got.Endpoint != want.Endpoint || got.PollIntervalMS != want.PollIntervalMS ||
+		got.Currency != want.Currency || got.KWhPrice != want.KWhPrice {
 		t.Errorf("Load = %+v, want %+v", got, want)
 	}
 }

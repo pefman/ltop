@@ -66,6 +66,9 @@ type Snapshot struct {
 	// successive power readings. It covers ltop's session, not the server's.
 	EnergyWh  float64
 	HasEnergy bool
+	// GPUEnergyWh is the same integral split by Device.Index, so each GPU
+	// row can show its own running electricity cost.
+	GPUEnergyWh map[int]float64
 
 	// StatsReset reports that totals are counted from a user-requested
 	// baseline rather than from server start, and StatsSince is how long ago

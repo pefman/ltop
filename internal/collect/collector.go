@@ -3,6 +3,7 @@ package collect
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync"
 	"time"
 
@@ -33,18 +34,20 @@ type Collector struct {
 	propsAt  time.Time
 	startAt  time.Time
 
-	lastModel       string
-	modelUnmatched  bool
-	lastDecodeRate  float64
-	lastPrefillRate float64
-	lastDecodeAt    time.Time
-	lastPrefillAt   time.Time
-	energyWh        float64
-	lastEnergyAt    time.Time
-	baseline        llama.Metrics
-	baselineSet     bool
-	baselineAt      time.Time
-	baselineEnergy  float64
+	lastModel           string
+	modelUnmatched      bool
+	lastDecodeRate      float64
+	lastPrefillRate     float64
+	lastDecodeAt        time.Time
+	lastPrefillAt       time.Time
+	energyWh            float64
+	energyByGPU         map[int]float64
+	lastEnergyAt        time.Time
+	baseline            llama.Metrics
+	baselineSet         bool
+	baselineAt          time.Time
+	baselineEnergy      float64
+	baselineEnergyByGPU map[int]float64
 
 	DecodeHist  *History
 	PrefillHist *History
@@ -78,6 +81,7 @@ func (c *Collector) ResetStats() {
 
 	c.baseline, c.baselineSet, c.baselineAt = c.prev, c.havePrev, time.Now()
 	c.baselineEnergy = c.energyWh
+	c.baselineEnergyByGPU = maps.Clone(c.energyByGPU)
 	// prev is deliberately kept: rates and restart detection compare against
 	// the server's absolute counters and are unaffected by the display window.
 	c.clearHistory()
@@ -290,15 +294,27 @@ func (c *Collector) accumulateEnergy(snap *Snapshot, now time.Time) {
 	if !readable {
 		return
 	}
+	if c.energyByGPU == nil {
+		c.energyByGPU = make(map[int]float64)
+	}
 	if !c.lastEnergyAt.IsZero() {
 		hours := now.Sub(c.lastEnergyAt).Hours()
 		// Guard against a suspended laptop reporting an enormous interval.
 		if hours > 0 && hours < 1 {
 			c.energyWh += watts * hours
+			for _, d := range snap.GPUs {
+				if d.HasPower {
+					c.energyByGPU[d.Index] += d.PowerWatts * hours
+				}
+			}
 		}
 	}
 	c.lastEnergyAt = now
 	snap.EnergyWh, snap.HasEnergy = c.energyWh-c.baselineEnergy, true
+	snap.GPUEnergyWh = make(map[int]float64, len(c.energyByGPU))
+	for idx, wh := range c.energyByGPU {
+		snap.GPUEnergyWh[idx] = wh - c.baselineEnergyByGPU[idx]
+	}
 }
 
 // deriveEfficiency computes tokens generated per joule of GPU energy.

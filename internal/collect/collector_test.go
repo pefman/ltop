@@ -396,6 +396,60 @@ func TestEnergySkippedWithoutPowerReadings(t *testing.T) {
 	}
 }
 
+func TestEnergyAccumulatesPerGPU(t *testing.T) {
+	c := New("http://127.0.0.1:1", "")
+	snap := Snapshot{GPUs: []gpu.Device{
+		{Index: 0, PowerWatts: 360, HasPower: true},
+		{Index: 1, PowerWatts: 180, HasPower: true},
+	}}
+	start := time.Now()
+
+	c.accumulateEnergy(&snap, start)
+	c.accumulateEnergy(&snap, start.Add(10*time.Second))
+
+	// 360 W for 10 s is 1 Wh; 180 W for 10 s is 0.5 Wh.
+	if math.Abs(snap.GPUEnergyWh[0]-1) > 1e-9 {
+		t.Errorf("GPU0 EnergyWh = %v, want 1", snap.GPUEnergyWh[0])
+	}
+	if math.Abs(snap.GPUEnergyWh[1]-0.5) > 1e-9 {
+		t.Errorf("GPU1 EnergyWh = %v, want 0.5", snap.GPUEnergyWh[1])
+	}
+	if math.Abs(snap.EnergyWh-1.5) > 1e-9 {
+		t.Errorf("total EnergyWh = %v, want 1.5", snap.EnergyWh)
+	}
+}
+
+func TestResetStatsRebasesEnergy(t *testing.T) {
+	c := New("http://127.0.0.1:1", "")
+	snap := Snapshot{GPUs: []gpu.Device{
+		{Index: 0, PowerWatts: 360, HasPower: true},
+	}}
+	start := time.Now()
+
+	c.accumulateEnergy(&snap, start)
+	c.accumulateEnergy(&snap, start.Add(10*time.Second))
+	if math.Abs(snap.EnergyWh-1) > 1e-9 {
+		t.Fatalf("pre-reset EnergyWh = %v, want 1", snap.EnergyWh)
+	}
+
+	c.ResetStats()
+	c.accumulateEnergy(&snap, start.Add(10*time.Second))
+	if snap.EnergyWh != 0 {
+		t.Errorf("EnergyWh just after reset = %v, want 0", snap.EnergyWh)
+	}
+	if snap.GPUEnergyWh[0] != 0 {
+		t.Errorf("GPU0 EnergyWh just after reset = %v, want 0", snap.GPUEnergyWh[0])
+	}
+
+	c.accumulateEnergy(&snap, start.Add(20*time.Second))
+	if math.Abs(snap.EnergyWh-1) > 1e-9 {
+		t.Errorf("EnergyWh after 10s in new window = %v, want 1", snap.EnergyWh)
+	}
+	if math.Abs(snap.GPUEnergyWh[0]-1) > 1e-9 {
+		t.Errorf("GPU0 EnergyWh after 10s in new window = %v, want 1", snap.GPUEnergyWh[0])
+	}
+}
+
 func TestResetStatsRebasesTotals(t *testing.T) {
 	f := newFakeServer(t)
 	c := New(f.URL, "")

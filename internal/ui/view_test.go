@@ -8,9 +8,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/pefman/ltop/internal/collect"
+	"github.com/pefman/ltop/internal/config"
+	"github.com/pefman/ltop/internal/format"
 	"github.com/pefman/ltop/internal/gpu"
 	"github.com/pefman/ltop/internal/host"
 	"github.com/pefman/ltop/internal/llama"
+	"github.com/pefman/ltop/internal/update"
 )
 
 // sampleSnapshot mirrors a real observation of a llama.cpp server running
@@ -67,6 +70,7 @@ func sampleSnapshot() collect.Snapshot {
 
 func newTestModel(t *testing.T, width int) *model {
 	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	m := newModel(t.Context(), testConfig())
 	m.width, m.height = width, 40
 	m.snap = sampleSnapshot()
@@ -195,17 +199,38 @@ type errTest struct{}
 
 func (errTest) Error() string { return "dial tcp 127.0.0.1:11436: connection refused (unreachable)" }
 
-func TestTotalsLineShowsLifetimeCounters(t *testing.T) {
-	m := newTestModel(t, 110)
+func TestStatsLineShowsLifetimeCounters(t *testing.T) {
+	m := newTestModel(t, 120)
+	snap := sampleSnapshot()
+	snap.EnergyWh, snap.HasEnergy = 12.4, true
+	m.snap = snap
+
+	stats := lineWith(t, m.View(), "STATS")
+	for _, want := range []string{"generated", "prefilled", "cached", "decodes", "saved"} {
+		if !strings.Contains(stats, want) {
+			t.Errorf("stats line missing %q:\n%s", want, stats)
+		}
+	}
+	if strings.Contains(stats, "12.4Wh") || strings.Contains(stats, "€") {
+		t.Errorf("cost figures still on stats line:\n%s", stats)
+	}
+}
+
+func TestCostsLineShowsEnergyTariffAndCurrency(t *testing.T) {
+	m := newTestModel(t, 120)
 	snap := sampleSnapshot()
 	snap.EnergyWh, snap.HasEnergy = 12.4, true
 	m.snap = snap
 
 	out := m.View()
-	for _, want := range []string{"TOTALS", "generated", "prefilled", "cached", "decodes", "saved", "12.4Wh"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("totals line missing %q", want)
+	costs := lineWith(t, out, "COSTS")
+	for _, want := range []string{"12.4Wh", "€0.0025", "€0.20/kWh", "EUR", "tok/J"} {
+		if !strings.Contains(costs, want) {
+			t.Errorf("costs line missing %q:\n%s", want, costs)
 		}
+	}
+	if strings.Contains(lineWith(t, out, "QUEUE"), "tok/J") {
+		t.Error("tok/J still on the queue line")
 	}
 }
 
@@ -222,20 +247,24 @@ func TestHeaderShowsRawContextSizes(t *testing.T) {
 }
 
 // Without metrics there are no counters to total.
-func TestTotalsHiddenWithoutMetrics(t *testing.T) {
+func TestStatsAndCostsHiddenWithoutMetrics(t *testing.T) {
 	m := newTestModel(t, 110)
 	snap := sampleSnapshot()
 	snap.HasMetrics = false
 	m.snap = snap
 
-	if strings.Contains(m.View(), "TOTALS") {
-		t.Error("totals rendered without metrics")
+	out := m.View()
+	if strings.Contains(out, "STATS") {
+		t.Error("stats rendered without metrics")
+	}
+	if strings.Contains(out, "COSTS") {
+		t.Error("costs rendered without metrics")
 	}
 }
 
 // The totals row must say when it is counting from a reset rather than from
 // server start, or a small number looks like an idle server.
-func TestTotalsLabelChangesAfterReset(t *testing.T) {
+func TestStatsLabelChangesAfterReset(t *testing.T) {
 	m := newTestModel(t, 110)
 	snap := sampleSnapshot()
 	snap.StatsReset = true
@@ -244,10 +273,13 @@ func TestTotalsLabelChangesAfterReset(t *testing.T) {
 
 	out := m.View()
 	if !strings.Contains(out, "SINCE") {
-		t.Error("reset totals not labelled")
+		t.Error("reset stats not labelled")
 	}
-	if !strings.Contains(out, "over 5m") {
-		t.Errorf("reset window not shown:\n%s", out)
+	if !strings.Contains(lineWith(t, out, "SINCE"), "over 5m") {
+		t.Errorf("reset window not shown on stats:\n%s", out)
+	}
+	if !strings.Contains(out, "COSTS") {
+		t.Error("costs line missing after reset")
 	}
 	if !strings.Contains(out, "z reset") {
 		t.Error("z key missing from footer")
@@ -261,4 +293,237 @@ func TestResetKeyInvokesCollector(t *testing.T) {
 	if _, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")}); cmd != nil {
 		t.Error("reset issued a poll while paused")
 	}
+}
+
+func TestGPURowShowsEuroCostRightOfWatts(t *testing.T) {
+	m := newTestModel(t, 120)
+	snap := sampleSnapshot()
+	// 100 Wh at the default €0.20/kWh is €0.02.
+	snap.HasEnergy = true
+	snap.EnergyWh = 100
+	snap.GPUEnergyWh = map[int]float64{0: 100}
+	m.snap = snap
+
+	out := m.View()
+	gpuLine := gpuLineOf(t, out)
+	wattsAt := strings.Index(gpuLine, "333/450W")
+	if wattsAt < 0 {
+		t.Fatalf("wattage missing from GPU line:\n%s", gpuLine)
+	}
+	euroAt := strings.Index(gpuLine[wattsAt:], "€0.0200")
+	if euroAt < 0 {
+		t.Fatalf("euro cost missing to the right of wattage:\n%s", gpuLine)
+	}
+}
+
+func TestPriceKeysStepByTenCents(t *testing.T) {
+	m := newTestModel(t, 120)
+	m.paused = true
+	if got := m.priceEUR(); got != 0.20 {
+		t.Fatalf("default price = €%.2f/kWh, want €0.20", got)
+	}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	if got := m.priceEUR(); got != 0.30 {
+		t.Errorf("w = €%.2f/kWh, want €0.30", got)
+	}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("W")})
+	if got := m.priceEUR(); got != 0.20 {
+		t.Errorf("W = €%.2f/kWh, want €0.20", got)
+	}
+
+	for i := 0; i < 30; i++ {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("W")})
+	}
+	if got := m.priceEUR(); got != 0 {
+		t.Errorf("price went below zero: €%.2f", got)
+	}
+}
+
+func TestEuroCostScalesWithPrice(t *testing.T) {
+	m := newTestModel(t, 120)
+	m.paused = true
+	snap := sampleSnapshot()
+	snap.HasEnergy = true
+	snap.EnergyWh = 100
+	snap.GPUEnergyWh = map[int]float64{0: 100}
+	m.snap = snap
+
+	if !strings.Contains(m.View(), "€0.0200") {
+		t.Fatalf("default cost missing:\n%s", gpuLineOf(t, m.View()))
+	}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	out := m.View()
+	if !strings.Contains(out, "€0.0300") {
+		t.Errorf("cost did not follow €0.30/kWh:\n%s", gpuLineOf(t, out))
+	}
+	if !strings.Contains(out, "€0.30/kWh") {
+		t.Errorf("footer tariff missing:\n%s", out)
+	}
+}
+
+func TestFooterAndHelpShowPriceKeys(t *testing.T) {
+	m := newTestModel(t, 140)
+	out := m.View()
+	if !strings.Contains(out, "w/W price") {
+		t.Error("w/W price missing from footer")
+	}
+	if !strings.Contains(out, "c currency") {
+		t.Error("c currency missing from footer")
+	}
+	if !strings.Contains(out, "€0.20/kWh") {
+		t.Error("current tariff missing from costs line")
+	}
+
+	m.showHelp = true
+	help := m.View()
+	if !strings.Contains(help, "w / W") {
+		t.Error("help missing w / W")
+	}
+	if !strings.Contains(help, "0.10") {
+		t.Error("help missing the 0.10 step")
+	}
+}
+
+func TestUpdateBannerAndInstallKey(t *testing.T) {
+	m := newTestModel(t, 120)
+	if strings.Contains(m.View(), "press u to install") {
+		t.Error("update banner shown without an available update")
+	}
+
+	m.update = &update.Available{Version: "9.9.9"}
+	out := m.View()
+	if !strings.Contains(out, "v9.9.9") {
+		t.Errorf("banner missing version:\n%s", out)
+	}
+	if !strings.Contains(out, "press u to install") {
+		t.Error("banner missing install hint")
+	}
+	if !strings.Contains(out, "u update") {
+		t.Error("u update missing from footer")
+	}
+
+	_, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+	if !m.updating {
+		t.Error("u did not start the install")
+	}
+	if cmd == nil {
+		t.Error("u did not return an install command")
+	}
+
+	m2 := newTestModel(t, 100)
+	if _, cmd := m2.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")}); cmd != nil || m2.updating {
+		t.Error("u without an update should be a no-op")
+	}
+}
+
+func TestCurrencyKeyCyclesIncludingSEK(t *testing.T) {
+	m := newTestModel(t, 140)
+	m.paused = true
+	snap := sampleSnapshot()
+	snap.HasEnergy = true
+	snap.EnergyWh = 100
+	snap.GPUEnergyWh = map[int]float64{0: 100}
+	m.snap = snap
+
+	if m.currency().Code != "EUR" {
+		t.Fatalf("default currency = %s, want EUR", m.currency().Code)
+	}
+
+	seen := map[string]bool{}
+	n := len(format.Currencies)
+	for i := 0; i < n; i++ {
+		seen[m.currency().Code] = true
+		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	}
+	if m.currency().Code != "EUR" {
+		t.Errorf("c did not wrap back to EUR, got %s", m.currency().Code)
+	}
+	for _, code := range []string{"EUR", "USD", "GBP", "SEK"} {
+		if !seen[code] {
+			t.Errorf("cycle missing %s", code)
+		}
+	}
+
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("C")})
+	if m.currency().Code != "AUD" {
+		t.Errorf("C from EUR = %s, want AUD (previous in cycle)", m.currency().Code)
+	}
+
+	// Land on SEK and check the GPU cost and footer follow.
+	for m.currency().Code != "SEK" {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	}
+	out := m.View()
+	if !strings.Contains(gpuLineOf(t, out), "0.0200 SEK") {
+		t.Errorf("SEK cost missing from GPU line:\n%s", gpuLineOf(t, out))
+	}
+	if !strings.Contains(out, "0.20 SEK/kWh") {
+		t.Errorf("SEK tariff missing from footer:\n%s", out)
+	}
+	if !strings.Contains(lineWith(t, out, "COSTS"), "SEK") {
+		t.Error("SEK missing from costs line")
+	}
+
+	m.showHelp = true
+	help := m.View()
+	if !strings.Contains(help, "c / C") {
+		t.Error("help missing c / C")
+	}
+}
+
+func TestCurrencyAndPricePersist(t *testing.T) {
+	m := newTestModel(t, 100)
+	m.paused = true
+	for m.currency().Code != "SEK" {
+		m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")})
+	}
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")})
+	m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("w")}) // 0.40
+
+	saved, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load after c/w: %v", err)
+	}
+	if saved.Currency != "SEK" {
+		t.Errorf("saved currency = %q, want SEK", saved.Currency)
+	}
+	if saved.KWhPrice != 0.40 {
+		t.Errorf("saved kWh price = %v, want 0.40", saved.KWhPrice)
+	}
+
+	again := newModel(t.Context(), saved)
+	if again.currency().Code != "SEK" {
+		t.Errorf("reloaded currency = %s, want SEK", again.currency().Code)
+	}
+	if again.priceEUR() != 0.40 {
+		t.Errorf("reloaded price = %v, want 0.40", again.priceEUR())
+	}
+}
+
+func TestUnknownSavedCurrencyFallsBackToEUR(t *testing.T) {
+	cfg := testConfig()
+	cfg.Currency = "XXX"
+	m := newModel(t.Context(), cfg)
+	if m.currency().Code != "EUR" {
+		t.Errorf("currency = %s, want EUR", m.currency().Code)
+	}
+}
+
+func gpuLineOf(t *testing.T, out string) string {
+	t.Helper()
+	return lineWith(t, out, "GPU0")
+}
+
+func lineWith(t *testing.T, out, label string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, label) {
+			return line
+		}
+	}
+	t.Fatalf("no %s line in:\n%s", label, out)
+	return ""
 }

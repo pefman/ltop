@@ -31,15 +31,25 @@ func runOnce(ctx context.Context, out io.Writer, cfg config.Config) error {
 		return fmt.Errorf("%s unreachable: %w", cfg.Endpoint, snap.Err)
 	}
 
-	printSnapshot(out, cfg.Endpoint, snap)
+	printSnapshot(out, cfg, snap)
 	return nil
 }
 
-func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
+func costSettings(cfg config.Config) (format.Currency, float64) {
+	cur := format.Currencies[format.CurrencyIndex(cfg.Currency)]
+	price := cfg.KWhPrice
+	if price <= 0 {
+		price = format.DefaultEURPerKWh
+	}
+	return cur, price
+}
+
+func printSnapshot(out io.Writer, cfg config.Config, s collect.Snapshot) {
 	p, m := s.Props, s.Raw
+	cur, price := costSettings(cfg)
 
 	section(out, "server")
-	kv(out, "endpoint", endpoint)
+	kv(out, "endpoint", cfg.Endpoint)
 	kv(out, "llama.cpp build", p.BuildInfo)
 	kv(out, "scrape", s.ScrapeR.Round(time.Microsecond).String())
 	kv(out, "sleeping", fmt.Sprint(p.IsSleeping))
@@ -63,7 +73,7 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 	}
 
 	if !s.HasMetrics {
-		printHost(out, s)
+		printHost(out, s, cur, price)
 		fmt.Fprintln(out)
 		return
 	}
@@ -85,6 +95,8 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 	}
 	if s.HasEnergy {
 		kv(out, "gpu energy observed", fmt.Sprintf("%.2f Wh", s.EnergyWh))
+		kv(out, "gpu energy cost", cur.Format(format.EnergyCostEUR(s.EnergyWh, price))+
+			" at "+cur.Tariff(price))
 	}
 
 	section(out, "cache")
@@ -136,7 +148,7 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 	if len(s.GPUs) > 0 {
 		section(out, "gpu")
 		for _, d := range s.GPUs {
-			printGPU(out, d)
+			printGPU(out, d, gpuEnergyWh(s, d.Index), cur, price)
 		}
 		if s.HasEfficiency {
 			kv(out, "efficiency", fmt.Sprintf("%.3f tok/J", s.TokensPerJoule))
@@ -145,7 +157,7 @@ func printSnapshot(out io.Writer, endpoint string, s collect.Snapshot) {
 	fmt.Fprintln(out)
 }
 
-func printHost(out io.Writer, s collect.Snapshot) {
+func printHost(out io.Writer, s collect.Snapshot, cur format.Currency, price float64) {
 	section(out, "host")
 	kv(out, "cpu", fmt.Sprintf("%.1f%% over %d cores", s.Host.CPUPercent, s.Host.CPUCores))
 	kv(out, "memory", fmt.Sprintf("%s of %s (%s)",
@@ -155,7 +167,7 @@ func printHost(out io.Writer, s collect.Snapshot) {
 	if len(s.GPUs) > 0 {
 		section(out, "gpu")
 		for _, d := range s.GPUs {
-			printGPU(out, d)
+			printGPU(out, d, gpuEnergyWh(s, d.Index), cur, price)
 		}
 	}
 }
@@ -167,7 +179,7 @@ func available(ok bool, hint string) string {
 	return "unavailable; " + hint
 }
 
-func printGPU(out io.Writer, d gpu.Device) {
+func printGPU(out io.Writer, d gpu.Device, energyWh float64, cur format.Currency, price float64) {
 	fmt.Fprintf(out, "  [%d] %s (%s)\n", d.Index, d.Name, d.Vendor)
 	if d.HasUtil {
 		kv(out, "  util", fmt.Sprintf("%.0f%%", d.UtilPercent))
@@ -181,7 +193,16 @@ func printGPU(out io.Writer, d gpu.Device) {
 	}
 	if d.HasPower {
 		kv(out, "  power", fmt.Sprintf("%.0fW of %.0fW", d.PowerWatts, d.PowerLimitWatts))
+		kv(out, "  energy cost", cur.Format(format.EnergyCostEUR(energyWh, price))+
+			" at "+cur.Tariff(price))
 	}
+}
+
+func gpuEnergyWh(s collect.Snapshot, index int) float64 {
+	if s.GPUEnergyWh == nil {
+		return 0
+	}
+	return s.GPUEnergyWh[index]
 }
 
 func section(out io.Writer, title string) {

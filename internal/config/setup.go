@@ -59,6 +59,10 @@ func Setup(ctx context.Context, in io.Reader, out io.Writer) (Config, error) {
 		APIKey:         apiKey,
 		PollIntervalMS: int(DefaultPollInterval / time.Millisecond),
 	}
+	if prev, err := Load(); err == nil {
+		c.Currency = prev.Currency
+		c.KWhPrice = prev.KWhPrice
+	}
 	if err := Save(c); err != nil {
 		return Config{}, fmt.Errorf("save config: %w", err)
 	}

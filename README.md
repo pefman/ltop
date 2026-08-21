@@ -11,7 +11,7 @@
  ltop v0.1.0  Qwen3.8-27B-UD-Q4_K_XL  Q4_K - Small  27.32B  16.7GiB      ● online
   http://127.0.0.1:11436  ctx 140032/262144  llama.cpp b10430  up 4m12s  scrape 27ms
 
-  GPU0      [||||||||||||||||||       ]    68%  23.4GiB of 24.0GiB  64°C  333/450W
+  GPU0      [||||||||||||||||||       ]    68%  23.4GiB of 24.0GiB  64°C  333/450W  €0.0670
     vram    [||||||||||||||||||||||||||] 97.5%  NVIDIA GeForce RTX 4090
   CPU       [|||||||||||              ]  43.8%  28 cores  load 9.05
   RAM       [|||||||||||||            ]  52.5%  32.8GiB of 62.5GiB
@@ -19,7 +19,7 @@
   DECODE       21.3 steps/s  ▂▃▅▇█▇▅▃▂▄▆█▇▅▃▂▁▃▅▇█▆▄▂
     tok/s      43.6 tok/s  measured 12s ago   lifetime 44.2
   PREFILL      1163 tok/s  measured 1m04s ago   lifetime 1161
-  QUEUE     1 processing   0 deferred   1.00 slots/decode   0.131 tok/J
+  QUEUE     1 processing   0 deferred   1.00 slots/decode
 
   KV CACHE  [|||||||||||||||||||||||  ]  93.0%  3.41M reused / 257.7k prefilled
   CONTEXT   [|||||||||                ]  36.9%  longest seen 140.0k tok
@@ -30,9 +30,10 @@
   SLOT STATE    TASK          PROMPT     CACHED     CTX
   0    running  10050          51716      50750   36.9%  [||||        ]
 
-  TOTALS    59.5k generated  1.13M prefilled  6.04M cached  21.4k decodes  ~1h16m saved
+  STATS     59.5k generated  1.13M prefilled  6.04M cached  21.4k decodes  ~1h16m saved
+  COSTS     12.4Wh  €0.0670  €0.20/kWh  EUR  0.131 tok/J
 
-  q quit   p pause   +/- 1s   s spec   g gpu   r refresh   ? help
+  q quit   p pause   +/- 1s   s spec   g gpu   r refresh   z reset   w/W price   c currency   ? help
 ```
 
 ## Why
@@ -112,7 +113,10 @@ ltop -once | grep 'hit rate'
 | `s` | toggle the speculative decoding panel |
 | `g` | toggle the GPU panel |
 | `r` | force one refresh |
+| `u` | install a pending self-update (when the orange banner is showing) |
 | `z` | reset the stats window to now |
+| `w` / `W` | raise / lower electricity price by 0.10/kWh |
+| `c` / `C` | cycle electricity currency (EUR, USD, GBP, SEK, NOK, DKK, CHF, PLN, CAD, AUD) |
 | `?` | help |
 
 ## What the metrics mean
@@ -128,7 +132,8 @@ ltop -once | grep 'hit rate'
 | **SPEC draft posN** | Share of drafts accepted at each depth. Where this falls off is your practical draft-length limit. |
 | **QUEUE** | Requests processing and deferred, plus busy slots per decode — how well batching is working. |
 | **tok/J** | Decode tokens per joule of GPU energy, for comparing quantisations and offload splits. Only reported while actively decoding. |
-| **TOTALS** | Lifetime counters from the server: tokens generated, prefilled, reused from cache, and `llama_decode()` calls. Plus an estimate of the prefill wall time the cache avoided, and the GPU energy ltop has observed since it started. Press `z` to count from now instead. |
+| **STATS** | Lifetime counters from the server: tokens generated, prefilled, reused from cache, and `llama_decode()` calls, plus an estimate of the prefill wall time the cache avoided. Press `z` to count from now instead. |
+| **COSTS** | GPU energy observed this session, the running electricity bill at the current per-kWh tariff (`w`/`W`, 0.10 steps, default 0.20), currency (`c`/`C`), and tok/J while decoding. Each GPU also shows its own running cost next to the watts. |
 
 ## Configuration
 
@@ -137,18 +142,29 @@ ltop -once | grep 'hit rate'
 ```json
 {
   "endpoint": "http://127.0.0.1:11436",
-  "poll_interval_ms": 1000
+  "poll_interval_ms": 1000,
+  "currency": "EUR",
+  "kwh_price": 0.2
 }
 ```
 
 The endpoint is not read from the environment. Run `ltop -reconfigure` to change it.
+`c`/`C` and `w`/`W` write `currency` and `kwh_price` so the last tariff is reused next time.
 
 ## Measuring a single run
 
-Press `z` to rebase the counters onto the current moment. The totals row switches
+Press `z` to rebase the counters onto the current moment. The stats row switches
 to `SINCE z` and reports only what has happened since, along with how long the
 window has been open, so one workload can be measured without restarting the
-server. Cache hit rate and speculative acceptance follow the same window.
+server. Cache hit rate, speculative acceptance, GPU energy and the cost
+figures follow the same window.
+
+The electricity tariff starts at €0.20/kWh, or whatever `w`/`W` and `c`/`C`
+last saved. Press `w` to raise it and `W` (shift+w) to lower it in 0.10 steps
+so the running cost matches your rate. Press `c` to cycle currency (EUR, USD,
+GBP, SEK, NOK, DKK, CHF, PLN, CAD, AUD) and `C` to go backwards. The numeric
+tariff is kept; nudge `w`/`W` after a switch if the local unit is a different
+scale.
 
 llama.cpp cannot zero its own counters, so ltop records where they stood and
 reports the difference. If the server restarts while a window is open, the
@@ -179,6 +195,25 @@ make build
 ```
 
 Tests cover the Prometheus parser against a captured `/metrics` fixture, the derived metrics, counter-reset rebaselining, degraded-endpoint handling, config persistence, and dashboard layout at several terminal widths.
+
+Release builds check GitHub for a newer version in the background. If one is
+waiting, an orange banner says so; press `u` to download it, verify the SHA-256,
+replace the binary, and restart. Check failures are ignored — the dashboard
+never depends on GitHub being reachable. `dev` / source builds do not self-update.
+
+The upgrade contract is frozen as protocol v1. Every `v*` release MUST publish
+these names (already-shipped binaries look them up under
+`/releases/latest/download/`):
+
+| Asset | Role |
+| --- | --- |
+| `update.json` | version + per-arch SHA-256 (schema 1) |
+| `checksums.txt` | same hashes, fallback if `update.json` is missing |
+| `ltop_linux_amd64.tar.gz` | archive with a top-level `ltop` binary |
+| `ltop_linux_arm64.tar.gz` | same for arm64 |
+
+Do not rename those files. Newer `update.json` schemas may add fields but must
+keep the v1 keys so old clients can still upgrade.
 
 Releases are cut by [GoReleaser](https://goreleaser.com) from a `v*` tag:
 

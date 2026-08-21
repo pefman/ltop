@@ -27,3 +27,14 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Frozen v1 update.json. Old ltop binaries fetch this exact name from
+      # /releases/latest/download/update.json — do not rename it.
+      - name: Publish update.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          go run ./internal/update/cmd/genmanifest -dist dist -version "$version"
+          gh release upload "$GITHUB_REF_NAME" dist/update.json --clobber

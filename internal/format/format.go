@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// DefaultEURPerKWh is a round European-ish household tariff used until the
+// user nudges it with w/W.
+const DefaultEURPerKWh = 0.20
+
 // Bytes renders a byte count with binary units.
 func Bytes(b uint64) string {
 	const unit = 1024
@@ -40,6 +44,17 @@ func Count(v float64) string {
 
 // Percent renders a 0..1 ratio.
 func Percent(ratio float64) string { return fmt.Sprintf("%.1f%%", ratio*100) }
+
+// Euros renders an electricity cost in euros.
+func Euros(v float64) string { return EUR.Format(v) }
+
+// EnergyCostEUR converts watt-hours at a euro-per-kWh tariff into euros.
+func EnergyCostEUR(wattHours, eurPerKWh float64) float64 {
+	if wattHours <= 0 || eurPerKWh <= 0 {
+		return 0
+	}
+	return wattHours / 1000 * eurPerKWh
+}
 
 // Rate renders a tokens-per-second figure.
 func Rate(v float64) string {

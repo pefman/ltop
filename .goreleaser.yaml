@@ -28,13 +28,16 @@ archives:
   - id: ltop
     ids:
       - ltop
-    # No version in the name, so the /releases/latest/download URL is stable.
+    # UPDATE PROTOCOL v1 — do not rename these archives. Self-update looks
+    # them up at /releases/latest/download/ltop_linux_{amd64,arm64}.tar.gz
+    # and expects a top-level binary named "ltop" plus checksums.txt.
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
       - LICENSE*
 
 checksum:
+  # Frozen name: old binaries also fetch checksums.txt if update.json is missing.
   name_template: checksums.txt
 
 snapshot:

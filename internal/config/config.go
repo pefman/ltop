@@ -14,9 +14,11 @@ import (
 
 // Config is the on-disk settings document.
 type Config struct {
-	Endpoint       string `json:"endpoint"`
-	APIKey         string `json:"api_key,omitempty"`
-	PollIntervalMS int    `json:"poll_interval_ms"`
+	Endpoint       string  `json:"endpoint"`
+	APIKey         string  `json:"api_key,omitempty"`
+	PollIntervalMS int     `json:"poll_interval_ms"`
+	Currency       string  `json:"currency,omitempty"`
+	KWhPrice       float64 `json:"kwh_price,omitempty"`
 }
 
 // DefaultPollInterval matches htop's refresh cadence and is cheap against
