@@ -40,7 +40,8 @@ One renamed asset on a future release breaks every older updater.
   `ltop.bak`. Restart via the original path (now the new inode), never
   `os.Executable()`. Restarting `.bak` re-launches the old version and
   the update banner loops. `v0.2.0`–`v0.2.5` need a one-time manual
-  install to pick up these apply fixes.
+  install to pick up these apply fixes. `v0.2.6` is the first that
+  restarts the new inode; later tags are reachable with `u` from there.
 
 The original GitHub **v0.1.0** binary cannot self-update (no updater). From
 **v0.2.2** onward, breaking the list above is what bricks upgrades.
