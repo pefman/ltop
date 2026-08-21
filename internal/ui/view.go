@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/pefman/ltop/internal/buildinfo"
 	"github.com/pefman/ltop/internal/format"
 	"github.com/pefman/ltop/internal/gpu"
+	"github.com/pefman/ltop/internal/update"
 )
 
 // labelCol is the width of the left-hand label column.
@@ -131,7 +133,9 @@ func (m *model) updateBanner() string {
 	case m.updating && m.update != nil:
 		return p.Warn.Render(format.Truncate("  installing v"+m.update.Version+"…", m.width)) + "\n"
 	case m.updateErr != nil:
-		return p.Err.Render(format.Truncate("  update failed: "+m.updateErr.Error(), m.width)) + "\n"
+		fail := p.Err.Render(format.Truncate("  update failed: "+m.updateErr.Error(), m.width))
+		hint := p.Muted.Render(format.Truncate("  update manually:  "+update.ManualInstall(runtime.GOOS, runtime.GOARCH), m.width))
+		return fail + "\n" + hint + "\n"
 	case m.update != nil:
 		msg := "  update v" + m.update.Version + " ready   press u to install"
 		style := p.Warn

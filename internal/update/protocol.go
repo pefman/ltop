@@ -74,6 +74,12 @@ func ArchiveName(goos, goarch string) string {
 // Platform is the assets-map key for GOOS/GOARCH, e.g. "linux/amd64".
 func Platform(goos, goarch string) string { return goos + "/" + goarch }
 
+// ManualInstall is the one-liner shown when self-update cannot replace the binary.
+func ManualInstall(goos, goarch string) string {
+	return "curl -sSL " + DefaultBase + "/" + ArchiveName(goos, goarch) +
+		" | tar xz && install -Dm755 ltop ~/.local/bin/ltop"
+}
+
 // ParseManifest reads a v1 (or forward-compatible) update.json.
 func ParseManifest(data []byte) (Manifest, error) {
 	var m Manifest

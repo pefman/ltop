@@ -419,6 +419,24 @@ func TestUpdateBannerAndInstallKey(t *testing.T) {
 	}
 }
 
+func TestUpdateFailureShowsManualInstall(t *testing.T) {
+	m := newTestModel(t, 160)
+	m.updateErr = errTest{}
+	out := m.View()
+	if !strings.Contains(out, "update failed") {
+		t.Error("missing failure text")
+	}
+	if !strings.Contains(out, "update manually") {
+		t.Error("missing manual-install hint")
+	}
+	if !strings.Contains(out, "releases/latest/download/ltop_linux_") {
+		t.Errorf("missing download URL:\n%s", out)
+	}
+	if !strings.Contains(out, "install -Dm755 ltop") {
+		t.Error("missing install command")
+	}
+}
+
 func TestCurrencyKeyCyclesIncludingSEK(t *testing.T) {
 	m := newTestModel(t, 140)
 	m.paused = true

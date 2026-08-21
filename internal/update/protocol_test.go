@@ -6,6 +6,16 @@ import (
 	"testing"
 )
 
+func TestManualInstallUsesFrozenURL(t *testing.T) {
+	got := ManualInstall("linux", "amd64")
+	if !strings.Contains(got, DefaultBase+"/ltop_linux_amd64.tar.gz") {
+		t.Errorf("ManualInstall = %q", got)
+	}
+	if !strings.Contains(got, "install -Dm755 ltop ~/.local/bin/ltop") {
+		t.Errorf("missing install: %q", got)
+	}
+}
+
 func TestArchiveNameIsFrozen(t *testing.T) {
 	if got := ArchiveName("linux", "amd64"); got != "ltop_linux_amd64.tar.gz" {
 		t.Errorf("amd64 archive = %q", got)
