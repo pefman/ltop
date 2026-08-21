@@ -64,3 +64,8 @@ Wait for the **release** workflow: GoReleaser **and** `Publish update.json` both
 `https://github.com/pefman/ltop/releases/latest/download/update.json`
 
 has `"version": "X.Y.Z"` and both `linux/amd64` and `linux/arm64` hashes.
+GitHub's `/releases/latest/download/` URL can lag the API by a minute after
+`update.json` is uploaded; wait until that file's `version` field matches
+the tag before testing `u`.
+
+A failed `u` prints `update manually:` plus the curl/install one-liner.
