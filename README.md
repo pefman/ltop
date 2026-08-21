@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ```
- ltop v0.1.0  Qwen3.8-27B-UD-Q4_K_XL  Q4_K - Small  27.32B  16.7GiB      ● online
+ ltop v1.0.0  Qwen3.8-27B-UD-Q4_K_XL  Q4_K - Small  27.32B  16.7GiB      ● online
   http://127.0.0.1:11436  ctx 140032/262144  llama.cpp b10430  up 4m12s  scrape 27ms
 
   GPU0      [||||||||||||||||||       ]    68%  23.4GiB of 24.0GiB  64°C  333/450W  €0.0670
@@ -218,7 +218,7 @@ keep the v1 keys so old clients can still upgrade.
 Releases are cut by [GoReleaser](https://goreleaser.com) from a `v*` tag:
 
 ```bash
-git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+git tag -a v1.0.0 -m "v1.0.0" && git push origin v1.0.0
 ```
 
 ## License
